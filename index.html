@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Teleprompter">
+<meta name="theme-color" content="#000000">
+<title>Teleprompter</title>
+<style>
+  :root{
+    --bg:#000;
+    --panel:#16181d;
+    --panel-2:#1f232b;
+    --line:#2c313c;
+    --text:#f5f7fa;
+    --muted:#9aa3b2;
+    --accent:#ffd23f;
+    --accent-2:#28c76f;
+    --danger:#ff5c5c;
+    --radius:16px;
+    --tap:56px;            /* ขนาดปุ่มขั้นต่ำสำหรับนิ้ว */
+  }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); }
+  body{
+    color:var(--text);
+    font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+                "Sukhumvit Set", "Thonburi", "Noto Sans Thai", sans-serif;
+    overflow:hidden;
+    -webkit-text-size-adjust:100%;
+    -webkit-user-select:none; user-select:none;
+    overscroll-behavior:none;
+    touch-action:manipulation;
+  }
+  button{ font-family:inherit; cursor:pointer; }
+
+  .screen{ position:fixed; inset:0; display:none; }
+  .screen.active{ display:flex; }
+
+  /* ===================== หน้าคลัง (Library) ===================== */
+  #library{ flex-direction:column; background:var(--bg);
+            padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+                    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+
+  .lib-head{ display:flex; align-items:center; gap:12px; padding:6px 2px 16px; }
+  .lib-head h1{ font-size:22px; margin:0; letter-spacing:.3px; flex:1; }
+  .lib-head .logo{ font-size:24px; }
+  .lib-body{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:120px; }
+
+  .toolbar{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+
+  .btn{
+    appearance:none; border:1px solid var(--line); background:var(--panel-2);
+    color:var(--text); border-radius:14px; padding:0 18px; height:var(--tap);
+    font-size:16px; font-weight:600; display:inline-flex; align-items:center; gap:8px;
+    transition:transform .05s ease, background .15s ease;
+  }
+  .btn:active{ transform:scale(.97); }
+  .btn.primary{ background:var(--accent); color:#1a1300; border-color:transparent; }
+  .btn.go{ background:var(--accent-2); color:#04250f; border-color:transparent; }
+  .btn.ghost{ background:transparent; }
+  .btn.icon{ padding:0; width:var(--tap); justify-content:center; font-size:20px; }
+  .btn.sm{ height:44px; font-size:14px; padding:0 14px; border-radius:12px; }
+
+  .empty{ text-align:center; color:var(--muted); padding:60px 20px; line-height:1.7; }
+  .empty .big{ font-size:46px; margin-bottom:10px; }
+
+  .card-list{ display:flex; flex-direction:column; gap:12px; }
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px 18px; display:flex; align-items:center; gap:14px;
+  }
+  .card .grow{ flex:1; min-width:0; }
+  .card h3{ margin:0 0 4px; font-size:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card p{ margin:0; color:var(--muted); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card .actions{ display:flex; gap:8px; flex-shrink:0; }
+
+  /* ===================== หน้าแก้ไข (Editor) ===================== */
+  #editor{ flex-direction:column; background:var(--bg);
+           padding:max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+                   max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+  .ed-head{ display:flex; align-items:center; gap:12px; padding-bottom:14px; }
+  .ed-head h2{ flex:1; margin:0; font-size:18px; }
+  #ed-title{
+    width:100%; height:var(--tap); border-radius:12px; border:1px solid var(--line);
+    background:var(--panel-2); color:var(--text); font-size:18px; padding:0 16px; margin-bottom:12px;
+  }
+  #ed-body{
+    flex:1; width:100%; resize:none; border-radius:14px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:18px; line-height:1.6;
+    padding:16px; -webkit-user-select:text; user-select:text;
+  }
+  input:focus, textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+
+  /* ===================== หน้าโปรย (Prompter) ===================== */
+  #prompter{ background:#000; }
+  #viewport{ position:absolute; inset:0; overflow:hidden; touch-action:none; transform-origin:50% 50%; }
+  #track{
+    position:absolute; left:0; right:0; top:0; will-change:transform;
+    padding:0 8vw; transform:translateY(0);
+  }
+  #track-inner{ font-weight:700; color:#fff; white-space:pre-wrap; word-wrap:break-word; }
+  /* ระยะเริ่ม/จบ เพื่อให้บรรทัดแรกขึ้นถึงเส้นอ่าน และบรรทัดสุดท้ายเลื่อนพ้นเส้นอ่านได้ */
+  #spacer-top{ height:42vh; }
+  #spacer-bottom{ height:75vh; }
+
+  /* เส้นบอกตำแหน่งอ่าน */
+  #guide{ position:absolute; left:0; right:0; top:42vh; pointer-events:none; display:none; }
+  #guide.on{ display:block; }
+  #guide .bar{ height:2px; background:rgba(255,210,63,.55); }
+  #guide .tri{ position:absolute; top:-7px; width:0; height:0;
+               border-top:8px solid transparent; border-bottom:8px solid transparent; }
+  #guide .tri.l{ left:8px; border-left:14px solid var(--accent); }
+  #guide .tri.r{ right:8px; border-right:14px solid var(--accent); }
+
+  /* แถบควบคุมด้านบน (ซ่อน/แสดงได้) */
+  #bar{
+    position:absolute; top:0; left:0; right:0; z-index:30;
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:calc(8px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 10px max(10px,env(safe-area-inset-left));
+    background:linear-gradient(to bottom, rgba(0,0,0,.85), rgba(0,0,0,0));
+    transition:opacity .25s ease, transform .25s ease;
+  }
+  #bar.hidden{ opacity:0; transform:translateY(-100%); pointer-events:none; }
+
+  /* แท็บเล็ก ๆ สำหรับเรียกแถบเครื่องมือกลับมา (แสดงเฉพาะตอนแถบถูกซ่อน) */
+  #bar-handle{
+    position:absolute; top:calc(env(safe-area-inset-top) + 2px); left:50%; transform:translateX(-50%);
+    z-index:31; width:72px; height:30px; border-radius:0 0 16px 16px;
+    border:1px solid rgba(255,255,255,.2); border-top:none; background:rgba(0,0,0,.6);
+    color:#fff; font-size:16px; align-items:center; justify-content:center;
+    display:none;
+  }
+  #bar-handle:active{ background:rgba(255,255,255,.22); }
+  .pbtn{
+    height:48px; min-width:48px; padding:0 12px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08);
+    color:#fff; font-size:15px; font-weight:600; display:inline-flex; align-items:center; gap:6px;
+  }
+  .pbtn:active{ background:rgba(255,255,255,.2); }
+  .pbtn.on{ background:var(--accent); color:#1a1300; border-color:transparent; }
+  .pbtn.wide{ font-size:14px; }
+  .pbtn .v{ font-variant-numeric:tabular-nums; min-width:30px; text-align:center; }
+  .grp{ display:flex; align-items:center; gap:4px; background:rgba(255,255,255,.06);
+        border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:4px; }
+  .grp .lbl{ font-size:12px; color:var(--muted); padding:0 6px; }
+  .spacer{ flex:1; }
+
+  /* คำใบ้กลางจอ */
+  #hint{
+    position:absolute; left:50%; bottom:8%; transform:translateX(-50%);
+    z-index:25; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.15);
+    color:#fff; padding:10px 18px; border-radius:999px; font-size:15px; pointer-events:none;
+    transition:opacity .4s ease; text-align:center;
+  }
+  #hint.gone{ opacity:0; }
+
+  /* ป้ายสถานะ เล่น/หยุด มุมจอ */
+  #status{
+    position:absolute; top:calc(env(safe-area-inset-top) + 70px); left:50%; transform:translateX(-50%);
+    z-index:24; background:rgba(0,0,0,.5); color:#fff; padding:8px 16px; border-radius:999px;
+    font-size:14px; font-weight:600; opacity:0; transition:opacity .2s ease; pointer-events:none;
+  }
+  #status.show{ opacity:1; }
+
+  .toast{
+    position:fixed; left:50%; bottom:40px; transform:translateX(-50%) translateY(20px);
+    background:#fff; color:#111; padding:12px 20px; border-radius:12px; font-weight:600;
+    z-index:100; opacity:0; transition:.25s ease; pointer-events:none;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .hide{ display:none !important; }
+</style>
+</head>
+<body>
+
+<!-- ============ หน้าคลังสคริปต์ ============ -->
+<section id="library" class="screen active">
+  <div class="lib-head">
+    <span class="logo">🎬</span>
+    <h1>Teleprompter</h1>
+    <button class="btn icon ghost" id="btn-menu" title="เพิ่มเติม">⋯</button>
+  </div>
+  <div class="toolbar">
+    <button class="btn primary" id="btn-new">＋ สคริปต์ใหม่</button>
+    <button class="btn sm ghost" id="btn-import">⬆ นำเข้าไฟล์</button>
+    <button class="btn sm ghost" id="btn-export">⬇ สำรองข้อมูล</button>
+    <input type="file" id="file-import" accept=".txt,.json,text/plain,application/json" multiple class="hide">
+  </div>
+  <div class="lib-body">
+    <div id="lib-empty" class="empty hide">
+      <div class="big">📄</div>
+      ยังไม่มีสคริปต์<br>
+      แตะ “＋ สคริปต์ใหม่” เพื่อเพิ่ม<br>
+      หรือวางไฟล์ .txt ไว้ในโฟลเดอร์ <b>scripts</b>
+    </div>
+    <div id="card-list" class="card-list"></div>
+  </div>
+</section>
+
+<!-- ============ หน้าแก้ไข ============ -->
+<section id="editor" class="screen">
+  <div class="ed-head">
+    <button class="btn icon ghost" id="ed-back">←</button>
+    <h2 id="ed-heading">แก้ไขสคริปต์</h2>
+    <button class="btn go" id="ed-save">บันทึก</button>
+  </div>
+  <input id="ed-title" type="text" placeholder="ชื่อสคริปต์ เช่น เปิดรายการ EP.1">
+  <textarea id="ed-body" placeholder="พิมพ์หรือวางบทพูดที่นี่..." spellcheck="false"></textarea>
+</section>
+
+<!-- ============ หน้าโปรย ============ -->
+<section id="prompter" class="screen">
+  <div id="viewport">
+    <div id="track">
+      <div id="spacer-top"></div>
+      <div id="track-inner"></div>
+      <div id="spacer-bottom"></div>
+    </div>
+  </div>
+
+  <div id="guide" class="on">
+    <span class="tri l"></span><span class="tri r"></span>
+    <div class="bar"></div>
+  </div>
+
+  <div id="status">⏸ หยุด</div>
+  <div id="hint">แตะหน้าจอ = เริ่ม/หยุดเลื่อน · ลากนิ้ว = เลื่อนเอง</div>
+
+  <div id="bar">
+    <button class="pbtn" id="p-exit">✕ ออก</button>
+    <button class="pbtn" id="p-restart">⤒ ขึ้นต้น</button>
+
+    <div class="grp">
+      <span class="lbl">เร็ว</span>
+      <button class="pbtn" id="spd-down">－</button>
+      <span class="v" id="spd-val">30</span>
+      <button class="pbtn" id="spd-up">＋</button>
+    </div>
+
+    <div class="grp">
+      <span class="lbl">ขนาด</span>
+      <button class="pbtn" id="fs-down">－</button>
+      <span class="v" id="fs-val">64</span>
+      <button class="pbtn" id="fs-up">＋</button>
+    </div>
+
+    <span class="spacer"></span>
+
+    <button class="pbtn wide" id="p-mirror">🪞 กระจก</button>
+    <button class="pbtn wide" id="p-flip">⇅ พลิกบน-ล่าง</button>
+    <button class="pbtn wide on" id="p-guide">▸ เส้นอ่าน</button>
+    <button class="pbtn" id="p-full">⛶</button>
+    <button class="pbtn" id="p-hidebar" title="ซ่อนแถบ">▴</button>
+  </div>
+
+  <button id="bar-handle" title="แสดงแถบเครื่องมือ">▾</button>
+</section>
+
+<div id="toast" class="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================== ที่เก็บข้อมูล ===================== */
+const LS = {
+  scripts: "tp.scripts.v1",
+  settings: "tp.settings.v1",
+  last: "tp.last.v1",
+  seeded: "tp.seeded.v1"
+};
+
+const DEFAULT_SETTINGS = {
+  speed: 30,        // 1–100
+  fontSize: 64,     // px
+  lineHeight: 1.45,
+  mirrorH: false,
+  mirrorV: false,
+  guide: true,
+  align: "left"
+};
+
+let scripts = load(LS.scripts, []);
+let settings = Object.assign({}, DEFAULT_SETTINGS, load(LS.settings, {}));
+let editingId = null;
+
+function load(key, fallback){
+  try{ const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; }
+  catch(e){ return fallback; }
+}
+function save(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
+function persistScripts(){ save(LS.scripts, scripts); }
+function persistSettings(){ save(LS.settings, settings); }
+function uid(){ return "s" + Math.random().toString(36).slice(2,9) + (scripts.length); }
+
+/* ===================== ตัวช่วย ===================== */
+const $ = sel => document.querySelector(sel);
+const el = {
+  // screens
+  library: $("#library"), editor: $("#editor"), prompter: $("#prompter"),
+  // library
+  cardList: $("#card-list"), libEmpty: $("#lib-empty"),
+  fileImport: $("#file-import"),
+  // editor
+  edTitle: $("#ed-title"), edBody: $("#ed-body"), edHeading: $("#ed-heading"),
+  // prompter
+  viewport: $("#viewport"), track: $("#track"), inner: $("#track-inner"),
+  guide: $("#guide"), bar: $("#bar"), hint: $("#hint"), status: $("#status"),
+  spdVal: $("#spd-val"), fsVal: $("#fs-val"),
+  pMirror: $("#p-mirror"), pFlip: $("#p-flip"), pGuide: $("#p-guide"),
+  toast: $("#toast")
+};
+
+let toastTimer = null;
+function toast(msg){
+  el.toast.textContent = msg; el.toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> el.toast.classList.remove("show"), 1600);
+}
+
+function showScreen(name){
+  [el.library, el.editor, el.prompter].forEach(s => s.classList.remove("active"));
+  ({library:el.library, editor:el.editor, prompter:el.prompter})[name].classList.add("active");
+}
+
+function preview(text){
+  const t = (text||"").replace(/\s+/g," ").trim();
+  return t ? t.slice(0,80) : "(ว่าง)";
+}
+
+/* ===================== หน้าคลัง ===================== */
+function renderLibrary(){
+  el.cardList.innerHTML = "";
+  if(!scripts.length){ el.libEmpty.classList.remove("hide"); return; }
+  el.libEmpty.classList.add("hide");
+
+  scripts.forEach(s => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.id = s.id;
+    card.innerHTML = `
+      <div class="grow">
+        <h3></h3>
+        <p></p>
+      </div>
+      <div class="actions">
+        <button class="btn sm ghost" data-act="del" title="ลบ">🗑</button>
+        <button class="btn sm ghost" data-act="edit">แก้ไข</button>
+        <button class="btn go sm" data-act="play">▶ โปรย</button>
+      </div>`;
+    card.querySelector("h3").textContent = s.title || "(ไม่มีชื่อ)";
+    card.querySelector("p").textContent = preview(s.body);
+    card.querySelector('[data-act="edit"]').onclick = () => openEditor(s.id);
+    card.querySelector('[data-act="play"]').onclick = () => startPrompter(s.id);
+    card.querySelector('[data-act="del"]').onclick = () => deleteScript(s.id);
+    el.cardList.appendChild(card);
+  });
+}
+
+/* ===================== หน้าแก้ไข ===================== */
+function openEditor(id){
+  editingId = id;
+  const s = scripts.find(x => x.id === id);
+  el.edHeading.textContent = s ? "แก้ไขสคริปต์" : "สคริปต์ใหม่";
+  el.edTitle.value = s ? s.title : "";
+  el.edBody.value = s ? s.body : "";
+  showScreen("editor");
+  if(!s) setTimeout(()=> el.edTitle.focus(), 50);
+}
+
+function saveEditor(){
+  const title = el.edTitle.value.trim() || "ไม่มีชื่อ";
+  const body = el.edBody.value;
+  if(editingId){
+    const s = scripts.find(x => x.id === editingId);
+    if(s){ s.title = title; s.body = body; }
+    else { scripts.unshift({ id:editingId, title, body }); }
+  } else {
+    scripts.unshift({ id:uid(), title, body });
+  }
+  persistScripts();
+  renderLibrary();
+  showScreen("library");
+  toast("บันทึกแล้ว");
+}
+
+function deleteScript(id){
+  const s = scripts.find(x => x.id === id);
+  if(!s) return;
+  if(!confirm(`ลบ “${s.title}” ?`)) return;
+  scripts = scripts.filter(x => x.id !== id);
+  persistScripts();
+  renderLibrary();
+  toast("ลบแล้ว");
+}
+
+/* ===================== นำเข้า / ส่งออก ===================== */
+function importFiles(fileList){
+  const files = Array.from(fileList);
+  let added = 0, done = 0, failed = 0;
+  if(!files.length) return;
+  const finish = () => {
+    if(++done !== files.length) return;
+    if(added){ persistScripts(); renderLibrary(); }
+    if(added) toast(`นำเข้า ${added} สคริปต์`);
+    else if(failed) toast("ไฟล์ JSON ไม่ถูกต้อง");
+    else toast("ไม่พบสคริปต์ในไฟล์");
+  };
+  files.forEach(f => {
+    const reader = new FileReader();
+    reader.onerror = finish;
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const base = f.name.replace(/\.[^.]+$/, "");
+      if(f.name.toLowerCase().endsWith(".json")){
+        try{
+          const data = JSON.parse(text);
+          const arr = Array.isArray(data) ? data : (data.scripts || []);
+          arr.forEach(item => {
+            if(item && typeof item.body === "string"){
+              scripts.unshift({ id:uid(), title:(item.title || base).toString(), body:item.body });
+              added++;
+            }
+          });
+        }catch(e){ failed++; }
+      } else if(text.trim()){
+        scripts.unshift({ id:uid(), title:base, body:text });
+        added++;
+      }
+      finish();
+    };
+    reader.readAsText(f);
+  });
+}
+
+function exportBackup(){
+  const blob = new Blob([JSON.stringify(scripts, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "teleprompter-backup.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+  toast("ดาวน์โหลดไฟล์สำรองแล้ว");
+}
+
+/* โหลดสคริปต์จากโฟลเดอร์ scripts/ (ทำงานเมื่อเปิดผ่านเว็บเซิร์ฟเวอร์ http/https) */
+async function loadFolderScripts(){
+  try{
+    const res = await fetch("scripts/manifest.json", {cache:"no-store"});
+    if(!res.ok) return;
+    const list = await res.json(); // [{title, file}] หรือ ["a.txt", ...]
+    const known = new Set(scripts.map(s => s.source).filter(Boolean));
+    let added = 0;
+    for(const item of list){
+      const file = typeof item === "string" ? item : item.file;
+      if(!file) continue;
+      const src = "scripts/" + file;
+      if(known.has(src)) continue; // ไฟล์นี้เคยโหลดแล้ว ไม่นำเข้าซ้ำ (กันทับฉบับที่แก้)
+      const title = typeof item === "string"
+        ? item.replace(/\.[^.]+$/,"")
+        : (item.title || file.replace(/\.[^.]+$/,""));
+      try{
+        const r = await fetch(src, {cache:"no-store"});
+        if(!r.ok) continue;
+        const body = await r.text();
+        scripts.push({ id:uid(), title, body, source:src });
+        known.add(src); added++;
+      }catch(e){}
+    }
+    if(added){ persistScripts(); renderLibrary(); }
+  }catch(e){ /* เปิดแบบ file:// หรือไม่มีโฟลเดอร์ — ข้ามได้ */ }
+}
+
+/* ===================== เครื่องเล่นโปรย ===================== */
+const prompter = {
+  playing:false,
+  offset:0,        // px ที่เลื่อนขึ้นไปแล้ว
+  max:0,
+  raf:0,
+  last:0
+};
+
+function applyTextStyle(){
+  el.inner.style.fontSize = settings.fontSize + "px";
+  el.inner.style.lineHeight = settings.lineHeight;
+  el.inner.style.textAlign = settings.align;
+  el.spdVal && (el.spdVal.textContent = settings.speed);
+  el.fsVal && (el.fsVal.textContent = settings.fontSize);
+}
+
+// การเลื่อน (translate) ใช้กับ #track ที่สูงมาก
+function applyScroll(){
+  el.track.style.transform = `translateY(${-prompter.offset}px)`;
+}
+// กระจกซ้าย-ขวา / พลิกบน-ล่าง ใช้กับ #viewport (ขนาดเท่าหน้าจอ) จุดหมุนจึงอยู่กลางจอเสมอ
+function applyMirror(){
+  const sx = settings.mirrorH ? -1 : 1;
+  const sy = settings.mirrorV ? -1 : 1;
+  el.viewport.style.transform = `scale(${sx}, ${sy})`;
+}
+function applyTransform(){ applyScroll(); applyMirror(); }
+
+function recalcMax(){
+  // ความสูงรวมที่เลื่อนได้ = สูงของ track ลบความสูง viewport
+  prompter.max = Math.max(0, el.track.scrollHeight - el.viewport.clientHeight);
+}
+
+function speedPxPerSec(){
+  // map 1–100 → ~12–600 px/s (โค้งกำลังสองให้ช่วงช้าละเอียดขึ้น)
+  const n = Math.min(100, Math.max(1, settings.speed));
+  return 12 + (n*n) * 0.0588; // 1→~12, 100→~600
+}
+
+function loop(ts){
+  if(!prompter.playing) return;
+  if(!prompter.last) prompter.last = ts;
+  const dt = Math.min(0.05, (ts - prompter.last) / 1000);
+  prompter.last = ts;
+  prompter.offset += speedPxPerSec() * dt;
+  if(prompter.offset >= prompter.max){
+    prompter.offset = prompter.max;
+    applyScroll();
+    setPlaying(false);
+    flashStatus("✓ จบสคริปต์");
+    return;
+  }
+  applyScroll();
+  prompter.raf = requestAnimationFrame(loop);
+}
+
+function setPlaying(on){
+  prompter.playing = on;
+  cancelAnimationFrame(prompter.raf);
+  prompter.last = 0;
+  if(on){
+    if(prompter.offset >= prompter.max - 1) prompter.offset = 0; // ถ้าจบแล้วกดเล่นใหม่ → เริ่มต้น
+    prompter.raf = requestAnimationFrame(loop);
+    flashStatus("▶ เล่น"); requestWakeLock();
+    autoHideBar();            // เล่นแล้วซ่อนแถบให้จอโล่ง
+  } else {
+    flashStatus("⏸ หยุด");
+    clearTimeout(barTimer); setBar(false);   // หยุด → แสดงแถบกลับมา
+  }
+  el.status.textContent = on ? "▶ เล่น" : "⏸ หยุด";
+}
+
+let statusTimer = null;
+function flashStatus(text){
+  el.status.textContent = text;
+  el.status.classList.add("show");
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(()=> el.status.classList.remove("show"), 900);
+}
+
+function startPrompter(id){
+  const s = scripts.find(x => x.id === id);
+  if(!s) return;
+  save(LS.last, id);
+  el.inner.textContent = s.body && s.body.trim() ? s.body : "(สคริปต์ว่าง)";
+  applyTextStyle();
+  syncPrompterUI();
+  clearTimeout(barTimer); setBar(false);   // เริ่มด้วยแถบเครื่องมือเปิดไว้
+  showScreen("prompter");
+
+  prompter.offset = 0;
+  prompter.playing = false;
+  el.status.textContent = "⏸ หยุด";
+
+  // คำใบ้แสดงสั้น ๆ แล้วจางหาย
+  el.hint.classList.remove("gone");
+  setTimeout(()=> el.hint.classList.add("gone"), 3200);
+
+  requestAnimationFrame(()=>{ recalcMax(); applyTransform(); });
+  requestWakeLock();
+}
+
+function exitPrompter(){
+  setPlaying(false);
+  releaseWakeLock();
+  showScreen("library");
+}
+
+function syncPrompterUI(){
+  el.spdVal.textContent = settings.speed;
+  el.fsVal.textContent = settings.fontSize;
+  el.pMirror.classList.toggle("on", settings.mirrorH);
+  el.pFlip.classList.toggle("on", settings.mirrorV);
+  el.pGuide.classList.toggle("on", settings.guide);
+  el.guide.classList.toggle("on", settings.guide);
+}
+
+/* ===================== ปุ่มควบคุมในหน้าโปรย ===================== */
+function changeSpeed(d){
+  settings.speed = Math.min(100, Math.max(1, settings.speed + d));
+  persistSettings(); el.spdVal.textContent = settings.speed; flashStatus("เร็ว "+settings.speed);
+}
+function changeFont(d){
+  settings.fontSize = Math.min(160, Math.max(20, settings.fontSize + d));
+  persistSettings(); applyTextStyle();
+  requestAnimationFrame(()=>{ recalcMax(); applyTransform(); });
+}
+function toggleMirror(){ settings.mirrorH = !settings.mirrorH; persistSettings(); syncPrompterUI(); applyMirror(); }
+function toggleFlip(){ settings.mirrorV = !settings.mirrorV; persistSettings(); syncPrompterUI(); applyMirror(); }
+function toggleGuide(){ settings.guide = !settings.guide; persistSettings(); syncPrompterUI(); }
+function restartTop(){ prompter.offset = 0; applyTransform(); flashStatus("⤒ ขึ้นต้น"); }
+
+/* แสดง/ซ่อนแถบเครื่องมือ */
+let barHidden = false, barTimer = null;
+function setBar(hidden){
+  barHidden = hidden;
+  el.bar.classList.toggle("hidden", hidden);
+  const h = document.getElementById("bar-handle");
+  if(h) h.style.display = hidden ? "flex" : "none";
+}
+function autoHideBar(){ clearTimeout(barTimer); barTimer = setTimeout(()=> setBar(true), 2200); }
+
+/* ===================== แตะ / ลาก บนหน้าจอ ===================== */
+let touch = { active:false, startY:0, startX:0, startOffset:0, moved:false, t0:0, wasPlaying:false };
+const MOVE_THRESH = 12; // px
+
+function onDown(x, y){
+  touch.active = true;
+  touch.startX = x; touch.startY = y;
+  touch.startOffset = prompter.offset;
+  touch.moved = false;
+  touch.t0 = Date.now();
+  touch.wasPlaying = prompter.playing;
+  // ขณะลากให้หยุด auto เพื่อ scrub ด้วยมือ
+  if(prompter.playing){ cancelAnimationFrame(prompter.raf); prompter.playing = false; prompter.last = 0; }
+}
+function onMove(x, y){
+  if(!touch.active) return;
+  const dx = x - touch.startX, dy = y - touch.startY;
+  if(!touch.moved && Math.hypot(dx, dy) > MOVE_THRESH) touch.moved = true;
+  if(touch.moved){
+    // ลากลง = ย้อนขึ้น (offset ลด), ลากขึ้น = เลื่อนไปข้างหน้า
+    let next = touch.startOffset - dy;
+    prompter.offset = Math.min(prompter.max, Math.max(0, next));
+    applyScroll();
+  }
+}
+function onUp(){
+  if(!touch.active) return;
+  touch.active = false;
+  const quick = (Date.now() - touch.t0) < 400;
+  if(!touch.moved && quick){
+    // แตะ = สลับเล่น/หยุด
+    setPlaying(!touch.wasPlaying);
+  } else {
+    // ลากเสร็จ → กลับสู่สถานะเดิม (ถ้าก่อนหน้านี้กำลังเล่น)
+    if(touch.wasPlaying) setPlaying(true);
+    else { el.status.textContent = "⏸ หยุด"; }
+  }
+}
+
+/* ===================== Wake Lock (กันจอดับ) ===================== */
+let wakeLock = null, wakeWarned = false;
+async function requestWakeLock(){
+  try{
+    if("wakeLock" in navigator){
+      if(!wakeLock){
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", ()=>{ wakeLock = null; });
+      }
+    } else if(!wakeWarned){
+      wakeWarned = true; // http/ไฟล์ตรง: ใช้ Wake Lock ไม่ได้ แนะนำตั้งค่าเครื่อง
+      toast("กันจอดับไม่ทำงาน: ตั้ง Auto-Lock = Never หรือเปิดผ่าน https");
+    }
+  }catch(e){}
+}
+function releaseWakeLock(){ try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null; }
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState === "visible" && el.prompter.classList.contains("active")) requestWakeLock();
+});
+
+/* ===================== Fullscreen ===================== */
+function toggleFullscreen(){
+  const d = document, e = d.documentElement;
+  const enter = e.requestFullscreen || e.webkitRequestFullscreen;
+  const exit  = d.exitFullscreen || d.webkitExitFullscreen;
+  if(!enter){
+    toast("เต็มจอ: ใน Safari แตะแชร์ → “เพิ่มไปยังหน้าจอโฮม” แล้วเปิดจากไอคอน");
+    return;
+  }
+  if(!d.fullscreenElement && !d.webkitFullscreenElement){ enter.call(e); }
+  else if(exit){ exit.call(d); }
+}
+
+/* ===================== ผูกอีเวนต์ ===================== */
+function bind(){
+  // คลัง
+  $("#btn-new").onclick = () => openEditor(null);
+  $("#btn-import").onclick = () => el.fileImport.click();
+  $("#btn-export").onclick = exportBackup;
+  el.fileImport.onchange = (e) => { importFiles(e.target.files); e.target.value = ""; };
+  $("#btn-menu").onclick = showMenu;
+
+  // แก้ไข
+  $("#ed-back").onclick = () => { showScreen("library"); };
+  $("#ed-save").onclick = saveEditor;
+
+  // โปรย: ปุ่มควบคุม
+  $("#p-exit").onclick = exitPrompter;
+  $("#p-restart").onclick = restartTop;
+  $("#spd-down").onclick = () => changeSpeed(-2);
+  $("#spd-up").onclick   = () => changeSpeed(+2);
+  $("#fs-down").onclick  = () => changeFont(-4);
+  $("#fs-up").onclick    = () => changeFont(+4);
+  el.pMirror.onclick = toggleMirror;
+  el.pFlip.onclick   = toggleFlip;
+  el.pGuide.onclick  = toggleGuide;
+  $("#p-full").onclick = toggleFullscreen;
+  $("#p-hidebar").onclick = () => setBar(true);
+
+  // แท็บเรียกแถบเครื่องมือกลับมา (ไม่กระทบการแตะเล่น/หยุด)
+  const handle = $("#bar-handle");
+  handle.addEventListener("pointerdown", e => e.stopPropagation());
+  handle.onclick = (e) => { e.stopPropagation(); setBar(false); };
+
+  // กันปุ่มในแถบไปโดน "แตะหน้าจอ"
+  el.bar.addEventListener("pointerdown", e => e.stopPropagation());
+  el.bar.addEventListener("touchstart", e => e.stopPropagation(), {passive:true});
+
+  // พื้นที่โปรย: แตะ/ลาก ด้วย Pointer Events
+  const area = el.viewport;
+  area.addEventListener("pointerdown", e => {
+    try{ area.setPointerCapture(e.pointerId); }catch(_){}
+    onDown(e.clientX, e.clientY);
+  });
+  area.addEventListener("pointermove", e => { onMove(e.clientX, e.clientY); });
+  area.addEventListener("pointerup",   e => { onUp(); });
+  // ระบบแย่ง gesture (ปัดขอบจอ/นิ้วที่สอง) → คืนสถานะเล่นเดิม ไม่ให้ค้างหยุดเงียบ ๆ
+  area.addEventListener("pointercancel", () => {
+    if(touch.active){ touch.active = false; if(touch.wasPlaying) setPlaying(true); }
+  });
+
+  // คีย์บอร์ด / รีโมต Bluetooth (Space, ลูกศร, PageUp/Down)
+  document.addEventListener("keydown", onKey);
+
+  // ปรับ max เมื่อหมุนจอ/เปลี่ยนขนาด
+  window.addEventListener("resize", () => {
+    if(el.prompter.classList.contains("active")){
+      requestAnimationFrame(()=>{ recalcMax(); applyTransform(); });
+    }
+  });
+}
+
+function onKey(e){
+  if(!el.prompter.classList.contains("active")) return;
+  switch(e.key){
+    case " ": case "Enter": case "PageDown":
+      e.preventDefault(); setPlaying(!prompter.playing); break;
+    case "PageUp":
+      e.preventDefault(); setPlaying(false); break;
+    case "ArrowUp": e.preventDefault(); changeSpeed(+2); break;
+    case "ArrowDown": e.preventDefault(); changeSpeed(-2); break;
+    case "ArrowRight": e.preventDefault(); changeFont(+4); break;
+    case "ArrowLeft": e.preventDefault(); changeFont(-4); break;
+    case "Home": e.preventDefault(); restartTop(); break;
+    case "m": case "M": toggleMirror(); break;
+    case "Escape": exitPrompter(); break;
+  }
+}
+
+/* เมนูเพิ่มเติม (ลบทั้งหมด ฯลฯ) — ใช้ prompt ง่าย ๆ */
+function showMenu(){
+  const choice = prompt(
+    "พิมพ์ตัวเลขแล้วกดตกลง:\n" +
+    "1 = รีเซ็ตการตั้งค่าโปรย\n" +
+    "2 = โหลดสคริปต์จากโฟลเดอร์ scripts ใหม่\n" +
+    "3 = ลบสคริปต์ทั้งหมด"
+  );
+  if(choice === "1"){ settings = Object.assign({}, DEFAULT_SETTINGS); persistSettings(); toast("รีเซ็ตค่าแล้ว"); }
+  else if(choice === "2"){ loadFolderScripts(); toast("กำลังโหลดจากโฟลเดอร์..."); }
+  else if(choice === "3"){
+    if(confirm("ลบสคริปต์ทั้งหมด?")){ scripts = []; persistScripts(); renderLibrary(); toast("ลบทั้งหมดแล้ว"); }
+  }
+}
+
+/* ===================== เริ่มทำงาน ===================== */
+function seedExamples(){
+  if(load(LS.seeded, false)) return;
+  if(scripts.length){ save(LS.seeded, true); return; }
+  scripts = [
+    {
+      id: uid(),
+      title: "ตัวอย่าง · เปิดคลิป",
+      body:
+"สวัสดีครับทุกคน ยินดีต้อนรับเข้าสู่ช่องของเรา\n\n" +
+"วันนี้เรามีเรื่องน่าสนใจมาฝากกันเหมือนเคย\n\n" +
+"ถ้าพร้อมแล้ว... ไปเริ่มกันเลย!\n\n\n" +
+"— วิธีใช้ —\n" +
+"• แตะหน้าจอ 1 ครั้ง เพื่อเริ่ม/หยุดการเลื่อน\n" +
+"• ลากนิ้วขึ้น-ลง เพื่อเลื่อนเอง\n" +
+"• แตะสองครั้งเร็ว ๆ เพื่อซ่อน/แสดงแถบเครื่องมือด้านบน\n" +
+"• ปุ่ม 🪞 กระจก ใช้เมื่อสะท้อนผ่านกระจกเทเลพรอมป์เตอร์\n" +
+"• ปรับความเร็วและขนาดตัวอักษรได้จากแถบด้านบน"
+    }
+  ];
+  persistScripts();
+  save(LS.seeded, true);
+}
+
+function storageOK(){
+  try{ localStorage.setItem("tp.__probe","1"); localStorage.removeItem("tp.__probe"); return true; }
+  catch(e){ return false; }
+}
+function init(){
+  bind();
+  if(!storageOK()) setTimeout(()=> toast("โหมดส่วนตัว: ข้อมูลจะไม่ถูกบันทึก"), 500);
+  seedExamples();
+  applyTextStyle();
+  renderLibrary();
+  // กัน pinch-zoom (double-tap zoom ปิดด้วย viewport meta + touch-action แล้ว)
+  document.addEventListener("gesturestart", e => e.preventDefault());
+  loadFolderScripts(); // โหลดเพิ่มจากโฟลเดอร์ถ้าเปิดผ่านเซิร์ฟเวอร์
+}
+
+init();
+</script>
+</body>
+</html>
