@@ -174,6 +174,42 @@
   }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 
+  /* ===================== รีโมต iPhone ===================== */
+  /* จุดสีสถานะบนปุ่ม 📱 */
+  #btn-remote, #p-remote{ position:relative; }
+  #btn-remote[data-state]::after, #p-remote[data-state]::after{
+    content:""; position:absolute; top:7px; right:7px; width:10px; height:10px; border-radius:50%;
+    box-shadow:0 0 0 2px var(--bg);
+  }
+  [data-state="off"]::after{ display:none; }
+  [data-state="loading"]::after, [data-state="ready"]::after{ background:var(--accent); }
+  [data-state="connected"]::after{ background:var(--accent-2); }
+  [data-state="reconnecting"]::after, [data-state="error"]::after{ background:var(--danger); }
+
+  #remote-panel{
+    position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.7);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .sheet-card{
+    width:100%; max-width:420px; max-height:100%; overflow-y:auto;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 20px 20px; display:flex; flex-direction:column; align-items:center; gap:14px;
+    text-align:center;
+  }
+  .sheet-head{ width:100%; display:flex; align-items:center; gap:12px; }
+  .sheet-head h2{ flex:1; margin:0; font-size:20px; text-align:left; }
+  #rp-status{ color:var(--muted); font-size:15px; }
+  #rp-status[data-state="connected"]{ color:var(--accent-2); }
+  #rp-status[data-state="error"], #rp-status[data-state="reconnecting"]{ color:var(--danger); }
+  .rp-code{ font-size:40px; font-weight:800; letter-spacing:.2em; font-variant-numeric:tabular-nums;
+            padding-left:.2em; -webkit-user-select:text; user-select:text; }
+  .rp-qr{ background:#fff; padding:12px; border-radius:12px; width:204px; height:204px;
+          display:flex; align-items:center; justify-content:center; color:#888; font-size:13px; }
+  .rp-qr img, .rp-qr canvas{ display:block; }
+  .rp-url{ color:var(--muted); font-size:12px; word-break:break-all; -webkit-user-select:text; user-select:text; }
+  .rp-actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .rp-hint{ color:var(--muted); font-size:13px; line-height:1.6; margin:0; }
+
   .hide{ display:none !important; }
 </style>
 </head>
@@ -184,6 +220,7 @@
   <div class="lib-head">
     <span class="logo">🎬</span>
     <h1>Teleprompter</h1>
+    <button class="btn icon ghost" id="btn-remote" title="รีโมต iPhone" data-state="off">📱</button>
     <button class="btn icon ghost" id="btn-menu" title="เพิ่มเติม">⋯</button>
   </div>
   <div class="toolbar">
@@ -255,12 +292,37 @@
     <button class="pbtn wide" id="p-mirror">🪞 กระจก</button>
     <button class="pbtn wide" id="p-flip">⇅ พลิกบน-ล่าง</button>
     <button class="pbtn wide on" id="p-guide">▸ เส้นอ่าน</button>
+    <button class="pbtn" id="p-remote" title="รีโมต iPhone" data-state="off">📱</button>
     <button class="pbtn" id="p-full">⛶</button>
     <button class="pbtn" id="p-hidebar" title="ซ่อนแถบ">▴</button>
   </div>
 
   <button id="bar-handle" title="แสดงแถบเครื่องมือ">▾</button>
 </section>
+
+<!-- ============ พาเนลรีโมต iPhone ============ -->
+<div id="remote-panel" class="hide">
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>📱 รีโมต iPhone</h2>
+      <button class="btn icon ghost" id="rp-close" title="ปิด">✕</button>
+    </div>
+    <div id="rp-status" data-state="off">ปิดอยู่</div>
+    <div class="rp-code hide" id="rp-code"></div>
+    <div class="rp-qr hide" id="rp-qr"></div>
+    <div class="rp-url hide" id="rp-url"></div>
+    <div class="rp-actions">
+      <button class="btn go" id="rp-toggle">เปิดรีโมต</button>
+      <button class="btn sm ghost hide" id="rp-copy">คัดลอกลิงก์</button>
+      <button class="btn sm ghost hide" id="rp-new">รหัสใหม่</button>
+    </div>
+    <p class="rp-hint">
+      สแกน QR ด้วยกล้อง iPhone หรือเปิดหน้า remote.html แล้วใส่รหัส<br>
+      ใช้ Wi‑Fi เดียวกัน (หรือ iPad ต่อ Hotspot ของ iPhone) · ต้องมีเน็ตตอนจับคู่<br>
+      ถ้าใช้แอปจากไอคอนบนโฮม ให้เปิดรีโมตจากไอคอนนั้น
+    </p>
+  </div>
+</div>
 
 <div id="toast" class="toast"></div>
 
@@ -272,7 +334,8 @@ const LS = {
   scripts: "tp.scripts.v1",
   settings: "tp.settings.v1",
   last: "tp.last.v1",
-  seeded: "tp.seeded.v1"
+  seeded: "tp.seeded.v1",
+  remote: "tp.remote.v1"     // { enabled, code } ของรีโมต iPhone
 };
 
 const DEFAULT_SETTINGS = {
@@ -288,14 +351,15 @@ const DEFAULT_SETTINGS = {
 let scripts = load(LS.scripts, []);
 let settings = Object.assign({}, DEFAULT_SETTINGS, load(LS.settings, {}));
 let editingId = null;
+let currentId = null;   // สคริปต์ที่เปิดในหน้าโปรยล่าสุด
 
 function load(key, fallback){
   try{ const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; }
   catch(e){ return fallback; }
 }
 function save(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
-function persistScripts(){ save(LS.scripts, scripts); }
-function persistSettings(){ save(LS.settings, settings); }
+function persistScripts(){ save(LS.scripts, scripts); remoteBroadcast(); }
+function persistSettings(){ save(LS.settings, settings); remoteBroadcast(); }
 function uid(){ return "s" + Math.random().toString(36).slice(2,9) + (scripts.length); }
 
 /* ===================== ตัวช่วย ===================== */
@@ -313,8 +377,26 @@ const el = {
   guide: $("#guide"), bar: $("#bar"), hint: $("#hint"), status: $("#status"),
   spdVal: $("#spd-val"), fsVal: $("#fs-val"),
   pMirror: $("#p-mirror"), pFlip: $("#p-flip"), pGuide: $("#p-guide"),
+  // remote
+  btnRemote: $("#btn-remote"), pRemote: $("#p-remote"),
+  rPanel: $("#remote-panel"), rStatus: $("#rp-status"), rCode: $("#rp-code"),
+  rQr: $("#rp-qr"), rUrl: $("#rp-url"), rToggle: $("#rp-toggle"),
+  rCopy: $("#rp-copy"), rNew: $("#rp-new"),
   toast: $("#toast")
 };
+
+// เรียกได้ไม่เกิน 1 ครั้งต่อ ms (ครั้งสุดท้ายในช่วงจะถูกเรียกตามหลังเสมอ) · .flush() = เรียกที่ค้างทันที
+function throttle(fn, ms){
+  let last = 0, timer = null;
+  const run = () => { timer = null; last = Date.now(); fn(); };
+  const t = () => {
+    const wait = ms - (Date.now() - last);
+    if(wait <= 0){ clearTimeout(timer); run(); }
+    else if(!timer){ timer = setTimeout(run, wait); }
+  };
+  t.flush = () => { if(timer){ clearTimeout(timer); run(); } };
+  return t;
+}
 
 let toastTimer = null;
 function toast(msg){
@@ -326,6 +408,7 @@ function toast(msg){
 function showScreen(name){
   [el.library, el.editor, el.prompter].forEach(s => s.classList.remove("active"));
   ({library:el.library, editor:el.editor, prompter:el.prompter})[name].classList.add("active");
+  remoteBroadcast();
 }
 
 function preview(text){
@@ -496,6 +579,7 @@ function applyTextStyle(){
 // การเลื่อน (translate) ใช้กับ #track ที่สูงมาก
 function applyScroll(){
   el.track.style.transform = `translateY(${-prompter.offset}px)`;
+  if(remote.conns.size) remoteProgress();
 }
 // กระจกซ้าย-ขวา / พลิกบน-ล่าง ใช้กับ #viewport (ขนาดเท่าหน้าจอ) จุดหมุนจึงอยู่กลางจอเสมอ
 function applyMirror(){
@@ -547,6 +631,7 @@ function setPlaying(on){
     clearTimeout(barTimer); setBar(false);   // หยุด → แสดงแถบกลับมา
   }
   el.status.textContent = on ? "▶ เล่น" : "⏸ หยุด";
+  remoteBroadcast();
 }
 
 let statusTimer = null;
@@ -560,6 +645,7 @@ function flashStatus(text){
 function startPrompter(id){
   const s = scripts.find(x => x.id === id);
   if(!s) return;
+  currentId = id;
   save(LS.last, id);
   el.inner.textContent = s.body && s.body.trim() ? s.body : "(สคริปต์ว่าง)";
   applyTextStyle();
@@ -575,13 +661,13 @@ function startPrompter(id){
   el.hint.classList.remove("gone");
   setTimeout(()=> el.hint.classList.add("gone"), 3200);
 
-  requestAnimationFrame(()=>{ recalcMax(); applyTransform(); });
+  requestAnimationFrame(()=>{ recalcMax(); applyTransform(); remoteBroadcast(); });
   requestWakeLock();
 }
 
 function exitPrompter(){
   setPlaying(false);
-  releaseWakeLock();
+  if(!remote.conns.size) releaseWakeLock();   // มีรีโมตต่ออยู่ → ให้จอเปิดค้างไว้
   showScreen("library");
 }
 
@@ -595,15 +681,20 @@ function syncPrompterUI(){
 }
 
 /* ===================== ปุ่มควบคุมในหน้าโปรย ===================== */
-function changeSpeed(d){
-  settings.speed = Math.min(100, Math.max(1, settings.speed + d));
+function setSpeed(n){
+  settings.speed = Math.min(100, Math.max(1, Math.round(n)));
   persistSettings(); el.spdVal.textContent = settings.speed; flashStatus("เร็ว "+settings.speed);
 }
-function changeFont(d){
-  settings.fontSize = Math.min(160, Math.max(20, settings.fontSize + d));
+function changeSpeed(d){ setSpeed(settings.speed + d); }
+function setFont(n){
+  settings.fontSize = Math.min(160, Math.max(20, Math.round(n)));
   persistSettings(); applyTextStyle();
   requestAnimationFrame(()=>{ recalcMax(); applyTransform(); });
 }
+function changeFont(d){ setFont(settings.fontSize + d); }
+// เลื่อนไปตำแหน่ง (0–1 ของความยาวทั้งหมด) / เลื่อนเพิ่มทีละ px — ถ้ากำลังเล่นอยู่จะเล่นต่อจากจุดใหม่
+function seekFraction(f){ prompter.offset = Math.min(1, Math.max(0, f)) * prompter.max; applyScroll(); }
+function nudge(px){ prompter.offset = Math.min(prompter.max, Math.max(0, prompter.offset + px)); applyScroll(); }
 function toggleMirror(){ settings.mirrorH = !settings.mirrorH; persistSettings(); syncPrompterUI(); applyMirror(); }
 function toggleFlip(){ settings.mirrorV = !settings.mirrorV; persistSettings(); syncPrompterUI(); applyMirror(); }
 function toggleGuide(){ settings.guide = !settings.guide; persistSettings(); syncPrompterUI(); }
@@ -616,6 +707,7 @@ function setBar(hidden){
   el.bar.classList.toggle("hidden", hidden);
   const h = document.getElementById("bar-handle");
   if(h) h.style.display = hidden ? "flex" : "none";
+  remoteBroadcast();
 }
 function autoHideBar(){ clearTimeout(barTimer); barTimer = setTimeout(()=> setBar(true), 2200); }
 
@@ -631,7 +723,7 @@ function onDown(x, y){
   touch.t0 = Date.now();
   touch.wasPlaying = prompter.playing;
   // ขณะลากให้หยุด auto เพื่อ scrub ด้วยมือ
-  if(prompter.playing){ cancelAnimationFrame(prompter.raf); prompter.playing = false; prompter.last = 0; }
+  if(prompter.playing){ cancelAnimationFrame(prompter.raf); prompter.playing = false; prompter.last = 0; remoteBroadcast(); }
 }
 function onMove(x, y){
   if(!touch.active) return;
@@ -675,7 +767,10 @@ async function requestWakeLock(){
 }
 function releaseWakeLock(){ try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null; }
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState === "visible" && el.prompter.classList.contains("active")) requestWakeLock();
+  if(document.visibilityState !== "visible") return;
+  // มีรีโมตต่ออยู่ → กันจอดับแม้อยู่หน้าคลัง ไม่งั้น iPad ล็อกจอแล้วการเชื่อมต่อหลุด
+  if(el.prompter.classList.contains("active") || remote.conns.size) requestWakeLock();
+  remoteOnVisible();
 });
 
 /* ===================== Fullscreen ===================== */
@@ -699,6 +794,18 @@ function bind(){
   $("#btn-export").onclick = exportBackup;
   el.fileImport.onchange = (e) => { importFiles(e.target.files); e.target.value = ""; };
   $("#btn-menu").onclick = showMenu;
+
+  // รีโมต iPhone
+  el.btnRemote.onclick = openRemotePanel;
+  el.pRemote.onclick = openRemotePanel;
+  $("#rp-close").onclick = closeRemotePanel;
+  el.rPanel.addEventListener("click", e => { if(e.target === el.rPanel) closeRemotePanel(); });
+  el.rToggle.onclick = () => { remote.on ? remoteStop() : remoteStart(); renderRemotePanel(); };
+  el.rCopy.onclick = copyRemoteLink;
+  el.rNew.onclick = () => {
+    if(!confirm("สร้างรหัสใหม่? iPhone ที่จับคู่ไว้จะต้องสแกนใหม่")) return;
+    remoteStop(); save(LS.remote, { enabled:false, code:newCode() }); remoteStart(); renderRemotePanel();
+  };
 
   // แก้ไข
   $("#ed-back").onclick = () => { showScreen("library"); };
@@ -782,6 +889,302 @@ function showMenu(){
   }
 }
 
+/* ===================== รีโมต iPhone ===================== */
+// iPad เปิด peer ชื่อ "tp-<รหัส>" บน PeerServer สาธารณะ แล้วรอ iPhone (remote.html) ต่อเข้ามา
+// หลังจับคู่ ข้อมูลวิ่งตรงระหว่างเครื่องผ่าน WebRTC · ไลบรารีโหลดเฉพาะตอนเปิดรีโมต (ใช้งานปกติยังออฟไลน์ได้)
+const PEER_LIB   = "https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js";
+const QR_LIB     = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+const REMOTE_URL = "https://nackkrmt.github.io/tele/remote.html";   // ใช้เมื่อเปิดแอปจาก file://
+const PEER_OPTS  = { debug: 1 };   // ถ้าจะใช้ PeerServer ของตัวเอง ใส่ host/port/path ที่นี่
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";   // ตัด 0/O/1/I/L ที่สับสนง่าย
+const STATUS_TEXT = {
+  off: "ปิดอยู่",
+  loading: "กำลังเปิด…",
+  ready: "พร้อม — รอ iPhone เชื่อมต่อ",
+  connected: "เชื่อมต่อแล้ว",
+  reconnecting: "กำลังเชื่อมต่อใหม่…",
+  error: "เชื่อมต่อไม่ได้"
+};
+const remote = { on:false, peer:null, conns:new Set(), code:"", status:"off", retry:0, timer:null, pending:false, hb:null };
+
+const scriptLoads = {};
+function loadScriptOnce(src, globalName){
+  if(window[globalName]) return Promise.resolve();
+  if(!scriptLoads[src]){
+    scriptLoads[src] = new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src; s.async = true;
+      s.onload = () => window[globalName] ? res() : rej(new Error("load " + src));
+      s.onerror = () => { s.remove(); rej(new Error("load " + src)); };
+      document.head.appendChild(s);
+    }).catch(e => { delete scriptLoads[src]; throw e; });
+  }
+  return scriptLoads[src];
+}
+
+function newCode(){
+  let c = "";
+  for(let i = 0; i < 6; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return c;
+}
+function remoteUrl(){
+  const base = /^https?:$/.test(location.protocol) ? new URL("remote.html", location.href).href : REMOTE_URL;
+  return base + "#" + remote.code;
+}
+
+function remoteStart(){
+  if(remote.on) return;
+  remote.on = true; remote.retry = 0;
+  remote.code = load(LS.remote, {}).code || newCode();
+  save(LS.remote, { enabled:true, code:remote.code });
+  clearInterval(remote.hb);
+  remote.hb = setInterval(remoteHeartbeat, 5000);
+  remoteConnect();
+}
+
+async function remoteConnect(){
+  if(!remote.on || remote.peer) return;
+  if(!remote.conns.size) setRemoteStatus("loading");
+  try{ await loadScriptOnce(PEER_LIB, "Peer"); }
+  catch(e){ if(remote.on) setRemoteStatus("error", "โหลดไลบรารีไม่ได้ ต้องต่ออินเทอร์เน็ต"); return; }
+  openPeer();
+}
+
+function openPeer(){
+  if(!remote.on || remote.peer) return;
+  const peer = new Peer("tp-" + remote.code, PEER_OPTS);
+  remote.peer = peer;
+
+  peer.on("open", () => {
+    if(remote.peer !== peer) return;
+    remote.retry = 0;
+    refreshRemoteStatus();
+  });
+
+  peer.on("connection", conn => {
+    const add = () => {
+      if(!remote.on || remote.conns.has(conn)) return;
+      remote.conns.add(conn); conn._seen = Date.now();
+      refreshRemoteStatus();
+      requestWakeLock();
+      remoteSend(conn, remoteState());
+    };
+    const drop = () => { if(remote.conns.delete(conn)) refreshRemoteStatus(); };
+    conn.on("open", add);
+    conn.on("data", msg => { add(); conn._seen = Date.now(); onRemoteMessage(msg, conn); });
+    conn.on("close", drop);
+    conn.on("error", drop);
+    conn.on("iceStateChanged", s => {
+      if(s === "failed" || s === "closed"){ try{ conn.close(); }catch(_){} drop(); }
+    });
+  });
+
+  // หลุดจากเซิร์ฟเวอร์จับคู่ (รีโมตที่ต่ออยู่แล้วยังใช้ได้) → ต่อใหม่ด้วย id เดิม
+  peer.on("disconnected", () => {
+    if(remote.peer !== peer || !remote.on) return;
+    refreshRemoteStatus("reconnecting");
+    scheduleReconnect();
+  });
+
+  peer.on("error", err => {
+    if(remote.peer !== peer || !remote.on) return;
+    const type = err && err.type;
+    if(type === "unavailable-id"){
+      // id ยังค้างบนเซิร์ฟเวอร์ (เช่น เพิ่งปิดแอปแบบไม่สะอาด) → รอแล้วลองรหัสเดิมก่อน iPhone จะได้ไม่ต้องสแกนใหม่
+      remote.peer = null; try{ peer.destroy(); }catch(_){}
+      if(remote.retry < 5){
+        refreshRemoteStatus("reconnecting", "รหัสยังค้างอยู่ รอสักครู่…");
+        scheduleReconnect();
+      } else {
+        remote.retry = 0; remote.code = newCode();
+        save(LS.remote, { enabled:true, code:remote.code });
+        renderRemotePanel();
+        toast("ได้รหัสรีโมตใหม่ ต้องสแกน QR ใหม่บน iPhone");
+        remoteConnect();
+      }
+    } else if(type === "browser-incompatible"){
+      setRemoteStatus("error", "เบราว์เซอร์นี้ไม่รองรับ");
+    } else if(type !== "peer-unavailable" && type !== "webrtc"){
+      refreshRemoteStatus("reconnecting");
+      scheduleReconnect();
+    }
+  });
+}
+
+function scheduleReconnect(){
+  clearTimeout(remote.timer);
+  const delay = Math.min(30000, 1000 * Math.pow(2, remote.retry++));
+  remote.timer = setTimeout(() => { remote.timer = null; remoteRevive(); }, delay);
+}
+function remoteRevive(){
+  if(!remote.on) return;
+  const p = remote.peer;
+  if(!p || p.destroyed){ remote.peer = null; remoteConnect(); }
+  else if(p.disconnected){ try{ p.reconnect(); }catch(_){} }
+}
+// iOS หยุด JS ตอนพักจอ/สลับแอป: ตัด iPhone ที่เงียบเกิน 10 วิ (iPhone ส่ง ping ทุก 2.5 วิ) และปลุกการเชื่อมต่อที่ตาย
+function remoteHeartbeat(){
+  if(!remote.on) return;
+  const now = Date.now();
+  [...remote.conns].forEach(c => {
+    if(now - c._seen > 10000){ remote.conns.delete(c); try{ c.close(); }catch(_){} }
+  });
+  refreshRemoteStatus();
+  const p = remote.peer;
+  if(!remote.timer && (!p || p.destroyed || p.disconnected)) scheduleReconnect();
+}
+function remoteOnVisible(){
+  if(!remote.on) return;
+  clearTimeout(remote.timer); remote.timer = null; remote.retry = 0;
+  remoteRevive();
+}
+
+function remoteStop(){
+  remote.on = false;
+  clearTimeout(remote.timer); remote.timer = null;
+  clearInterval(remote.hb); remote.hb = null;
+  const conns = [...remote.conns]; remote.conns.clear();
+  conns.forEach(c => { try{ c.close(); }catch(_){} });
+  if(remote.peer){ const p = remote.peer; remote.peer = null; try{ p.destroy(); }catch(_){} }
+  save(LS.remote, { enabled:false, code:remote.code });
+  setRemoteStatus("off");
+  if(!el.prompter.classList.contains("active")) releaseWakeLock();
+}
+
+window.addEventListener("pagehide", () => {
+  // ปิดหน้า → คืน id ให้เซิร์ฟเวอร์ทันที เปิดใหม่จะได้ใช้รหัสเดิมได้เลย
+  const p = remote.peer;
+  if(p){ remote.peer = null; try{ p.destroy(); }catch(_){} }
+});
+window.addEventListener("pageshow", e => { if(e.persisted) remoteOnVisible(); });
+window.addEventListener("online", remoteOnVisible);
+
+/* ----- สถานะที่ส่งให้ iPhone ----- */
+function currentScreen(){
+  return el.prompter.classList.contains("active") ? "prompter"
+       : el.editor.classList.contains("active") ? "editor" : "library";
+}
+function progressValue(){ return prompter.max ? Math.min(1, prompter.offset / prompter.max) : 0; }
+function remoteState(){
+  const s = currentId ? scripts.find(x => x.id === currentId) : null;
+  return {
+    t:"state", v:1, screen:currentScreen(),
+    playing:prompter.playing, progress:progressValue(),
+    speed:settings.speed, fontSize:settings.fontSize,
+    mirrorH:settings.mirrorH, mirrorV:settings.mirrorV, guide:settings.guide, barHidden,
+    scriptId: s ? s.id : null, title: s ? (s.title || "(ไม่มีชื่อ)") : "",
+    scripts: scripts.map(x => ({ id:x.id, title:x.title || "(ไม่มีชื่อ)" }))
+  };
+}
+function remoteSend(conn, msg){ try{ if(conn.open) conn.send(msg); }catch(_){} }
+// รวมการเปลี่ยนแปลงหลายอย่างในช่วง 30 ms เป็นข้อความเดียว (อ่านสถานะตอนส่งจริง)
+function remoteBroadcast(){
+  if(!remote.conns.size || remote.pending) return;
+  remote.pending = true;
+  setTimeout(() => {
+    remote.pending = false;
+    const st = remoteState();
+    remote.conns.forEach(c => remoteSend(c, st));
+  }, 30);
+}
+const remoteProgress = throttle(() => {
+  const m = { t:"progress", p:progressValue(), playing:prompter.playing };
+  remote.conns.forEach(c => remoteSend(c, m));
+}, 100);
+
+/* ----- คำสั่งจาก iPhone (เรียกฟังก์ชันเดียวกับปุ่ม/คีย์บอร์ด) ----- */
+function onRemoteMessage(msg, conn){
+  if(!msg || typeof msg !== "object") return;
+  const inPrompter = el.prompter.classList.contains("active");
+  const num = v => typeof v === "number" && isFinite(v);
+  switch(msg.t){
+    case "hello": case "state?": remoteSend(conn, remoteState()); break;
+    case "ping":   remoteSend(conn, { t:"pong", ts:msg.ts }); break;
+    // เล่น/เลื่อน — เฉพาะหน้าโปรย (กติกาเดียวกับคีย์บอร์ด)
+    case "toggle": if(inPrompter) setPlaying(!prompter.playing); break;
+    case "play":   if(inPrompter) setPlaying(true); break;
+    case "pause":  if(inPrompter) setPlaying(false); break;
+    case "top":    if(inPrompter) restartTop(); break;
+    case "seek":   if(inPrompter && num(msg.f)) seekFraction(msg.f); break;
+    case "nudge":
+      if(!inPrompter) break;
+      if(num(msg.px)) nudge(msg.px);
+      else if(num(msg.lines)) nudge(msg.lines * settings.fontSize * settings.lineHeight);
+      break;
+    case "bar":
+      if(inPrompter){ clearTimeout(barTimer); setBar(typeof msg.v === "boolean" ? msg.v : !barHidden); }
+      break;
+    // ค่าตั้ง — ใช้ได้ทุกหน้า
+    case "speed":  num(msg.v) ? setSpeed(msg.v) : num(msg.d) && changeSpeed(msg.d); break;
+    case "font":   num(msg.v) ? setFont(msg.v)  : num(msg.d) && changeFont(msg.d); break;
+    case "mirror": toggleMirror(); break;
+    case "flip":   toggleFlip(); break;
+    case "guide":  toggleGuide(); break;
+    // เปลี่ยนหน้า
+    case "open":
+      if(el.editor.classList.contains("active")){ remoteSend(conn, { t:"toast", msg:"iPad กำลังแก้ไขสคริปต์อยู่" }); break; }
+      if(!scripts.some(x => x.id === msg.id)){ remoteSend(conn, { t:"toast", msg:"ไม่พบสคริปต์นี้บน iPad" }); break; }
+      if(prompter.playing) setPlaying(false);
+      closeRemotePanel();
+      startPrompter(msg.id);
+      break;
+    case "exit":   if(inPrompter) exitPrompter(); break;
+  }
+}
+
+/* ----- พาเนลรีโมตบน iPad ----- */
+function setRemoteStatus(status, detail){
+  remote.status = status;
+  el.btnRemote.dataset.state = status;
+  el.pRemote.dataset.state = status;
+  let text = STATUS_TEXT[status] || status;
+  if(status === "connected" && remote.conns.size > 1) text += ` (${remote.conns.size} เครื่อง)`;
+  if(detail) text += " · " + detail;
+  el.rStatus.textContent = text;
+  el.rStatus.dataset.state = status;
+}
+// เลือกสถานะจากความจริงตอนนี้ · fallback = สถานะที่ใช้เมื่อยังไม่มี iPhone และ peer ยังไม่พร้อม
+function refreshRemoteStatus(fallback, detail){
+  if(!remote.on) return setRemoteStatus("off");
+  if(remote.conns.size) return setRemoteStatus("connected");
+  if(remote.peer && remote.peer.open) return setRemoteStatus("ready");
+  if(fallback) setRemoteStatus(fallback, detail);
+}
+
+function openRemotePanel(){
+  if(prompter.playing) setPlaying(false);
+  renderRemotePanel();
+  el.rPanel.classList.remove("hide");
+}
+function closeRemotePanel(){ el.rPanel.classList.add("hide"); }
+function renderRemotePanel(){
+  const on = remote.on;
+  el.rToggle.textContent = on ? "ปิดรีโมต" : "เปิดรีโมต";
+  el.rToggle.className = on ? "btn" : "btn go";
+  [el.rCode, el.rQr, el.rUrl, el.rCopy, el.rNew].forEach(x => x.classList.toggle("hide", !on));
+  if(!on) return;
+  el.rCode.textContent = remote.code;
+  el.rUrl.textContent = remoteUrl();
+  drawQr();
+}
+function drawQr(){
+  const url = remoteUrl();
+  if(el.rQr.dataset.url === url) return;
+  el.rQr.dataset.url = "";
+  el.rQr.textContent = "กำลังสร้าง QR…";
+  loadScriptOnce(QR_LIB, "QRCode").then(() => {
+    if(remoteUrl() !== url) return;
+    el.rQr.innerHTML = "";
+    new QRCode(el.rQr, { text:url, width:180, height:180, correctLevel:QRCode.CorrectLevel.M });
+    el.rQr.dataset.url = url;
+  }).catch(() => { el.rQr.textContent = "สร้าง QR ไม่ได้ (ออฟไลน์) ใช้รหัสด้านบนแทน"; });
+}
+async function copyRemoteLink(){
+  const url = remoteUrl();
+  try{ await navigator.clipboard.writeText(url); toast("คัดลอกลิงก์แล้ว"); }
+  catch(e){ prompt("คัดลอกลิงก์นี้ไปเปิดบน iPhone", url); }
+}
+
 /* ===================== เริ่มทำงาน ===================== */
 function seedExamples(){
   if(load(LS.seeded, false)) return;
@@ -819,6 +1222,8 @@ function init(){
   // กัน pinch-zoom (double-tap zoom ปิดด้วย viewport meta + touch-action แล้ว)
   document.addEventListener("gesturestart", e => e.preventDefault());
   loadFolderScripts(); // โหลดเพิ่มจากโฟลเดอร์ถ้าเปิดผ่านเซิร์ฟเวอร์
+  // เคยเปิดรีโมตไว้ → เปิดรอ iPhone เองทุกครั้งที่เข้าแอป
+  if(load(LS.remote, {}).enabled) setTimeout(remoteStart, 300);
 }
 
 init();

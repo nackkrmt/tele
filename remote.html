@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TP Remote">
+<meta name="theme-color" content="#000000">
+<title>TP Remote</title>
+<style>
+  :root{
+    --bg:#000;
+    --panel:#16181d;
+    --panel-2:#1f232b;
+    --line:#2c313c;
+    --text:#f5f7fa;
+    --muted:#9aa3b2;
+    --accent:#ffd23f;
+    --accent-2:#28c76f;
+    --danger:#ff5c5c;
+    --radius:16px;
+    --tap:56px;
+  }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); }
+  body{
+    color:var(--text);
+    font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+                "Sukhumvit Set", "Thonburi", "Noto Sans Thai", sans-serif;
+    overflow:hidden;
+    -webkit-text-size-adjust:100%;
+    -webkit-user-select:none; user-select:none;
+    -webkit-touch-callout:none;
+    overscroll-behavior:none;
+    touch-action:manipulation;
+  }
+  button{ font-family:inherit; cursor:pointer; }
+
+  .btn{
+    appearance:none; border:1px solid var(--line); background:var(--panel-2);
+    color:var(--text); border-radius:14px; padding:0 18px; height:var(--tap);
+    font-size:16px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    transition:transform .05s ease, background .15s ease;
+  }
+  .btn:active{ transform:scale(.97); }
+  .btn.go{ background:var(--accent-2); color:#04250f; border-color:transparent; }
+  .btn.ghost{ background:transparent; }
+  .btn.icon{ padding:0; width:var(--tap); font-size:20px; }
+
+  .pbtn{
+    height:48px; min-width:48px; padding:0 10px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08);
+    color:#fff; font-size:15px; font-weight:600;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .pbtn:active, .pbtn.held{ background:rgba(255,255,255,.22); }
+  .pbtn.on{ background:var(--accent); color:#1a1300; border-color:transparent; }
+
+  /* ===================== โครงหน้า ===================== */
+  #app{
+    position:fixed; inset:0; display:flex; flex-direction:column; gap:10px;
+    padding:max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+            max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  /* แถบสถานะการเชื่อมต่อ */
+  #conn{
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:none; border:none; color:var(--muted); font-size:14px; padding:4px 2px; text-align:left;
+  }
+  #conn .dot{ width:10px; height:10px; border-radius:50%; background:var(--muted); flex-shrink:0; }
+  #conn[data-state="connected"] .dot{ background:var(--accent-2); }
+  #conn[data-state="connecting"] .dot{ background:var(--accent); }
+  #conn[data-state="notfound"] .dot, #conn[data-state="lost"] .dot,
+  #conn[data-state="offline"] .dot, #conn[data-state="error"] .dot,
+  #conn[data-state="nolib"] .dot{ background:var(--danger); }
+  #conn .txt{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #conn .code{ font-weight:700; color:var(--text); letter-spacing:.12em; font-variant-numeric:tabular-nums; }
+
+  /* ชื่อสคริปต์ */
+  .title-row{ display:flex; gap:8px; }
+  #title{
+    flex:1; min-width:0; height:48px; border-radius:12px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:16px; font-weight:600;
+    display:flex; align-items:center; gap:8px; padding:0 14px; text-align:left;
+  }
+  #title .t{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #title .chev{ color:var(--muted); }
+
+  /* แถบความคืบหน้า (แตะ/ลาก = กระโดดไปตำแหน่ง) */
+  #prog{
+    position:relative; height:30px; border-radius:10px; overflow:hidden; touch-action:none;
+    background:var(--panel-2); border:1px solid var(--line);
+  }
+  #prog-fill{ position:absolute; left:0; top:0; bottom:0; width:0; background:rgba(255,210,63,.35); }
+  #prog-pct{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; pointer-events:none;
+  }
+
+  /* ทัชแพดเลื่อนข้อความ + ปุ่มข้าง */
+  .main{ flex:1; min-height:0; display:flex; gap:10px; }
+  #pad{
+    flex:1; border-radius:var(--radius); border:2px dashed var(--line); background:var(--panel);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    color:var(--muted); text-align:center; font-size:14px; line-height:1.6; touch-action:none;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  #pad .arrows{ font-size:30px; line-height:1; color:var(--line); }
+  #pad.active{ background:var(--panel-2); border-color:var(--accent); }
+  .side{ width:72px; display:flex; flex-direction:column; gap:10px; }
+  .side .pbtn{ flex:1; height:auto; min-height:48px; flex-direction:column; gap:2px; font-size:20px; }
+  .side .pbtn small{ font-size:11px; font-weight:600; }
+
+  .toggles{ display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .toggles .pbtn{ font-size:13px; padding:0 4px; flex-direction:column; gap:0; height:52px; }
+  .toggles .pbtn b{ font-size:18px; line-height:1.1; }
+
+  .settings{ display:flex; gap:8px; }
+  .grp{ flex:1; display:flex; align-items:center; gap:4px; background:rgba(255,255,255,.06);
+        border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:4px; }
+  .grp .lbl{ font-size:12px; color:var(--muted); padding:0 4px; }
+  .grp .v{ flex:1; text-align:center; font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .grp .pbtn{ font-size:20px; width:46px; padding:0; }
+
+  #speed-range{ width:100%; height:32px; margin:0; accent-color:var(--accent); touch-action:none; }
+
+  #play{
+    height:68px; border-radius:18px; border:none; font-size:22px; font-weight:800;
+    background:var(--accent-2); color:#04250f;
+  }
+  #play.playing{ background:var(--accent); color:#1a1300; }
+  #play:active{ transform:scale(.98); }
+
+  /* ปิดปุ่มเมื่อยังไม่ได้เชื่อมต่อ / iPad ไม่ได้อยู่หน้าโปรย */
+  .ctl{ transition:opacity .2s ease; }
+  #app:not(.live) .ctl,
+  #app[data-screen="library"] .pb,
+  #app[data-screen="editor"] .pb,
+  #app[data-screen="editor"] #title{ opacity:.35; pointer-events:none; }
+
+  /* ===================== แผ่นเลื่อนขึ้น (รายการสคริปต์ / ใส่รหัส) ===================== */
+  .sheet{
+    position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.7);
+    display:flex; align-items:flex-end; justify-content:center;
+    padding:0 0 env(safe-area-inset-bottom);
+  }
+  .sheet-card{
+    width:100%; max-height:80vh; display:flex; flex-direction:column; gap:12px;
+    background:var(--panel); border:1px solid var(--line); border-bottom:none;
+    border-radius:20px 20px 0 0; padding:16px 16px 20px;
+  }
+  .sheet-head{ display:flex; align-items:center; gap:10px; }
+  .sheet-head h2{ flex:1; margin:0; font-size:19px; }
+  .muted{ color:var(--muted); font-size:14px; line-height:1.6; margin:0; }
+
+  #script-list{ overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:8px; }
+  .item{
+    width:100%; min-height:52px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2);
+    color:var(--text); font-size:16px; font-weight:600; text-align:left; padding:10px 14px;
+  }
+  .item.current{ border-color:var(--accent); color:var(--accent); }
+
+  #code-input{
+    height:64px; border-radius:14px; border:1px solid var(--line); background:var(--panel-2);
+    color:var(--text); font-size:30px; font-weight:800; letter-spacing:.3em; text-align:center;
+    text-transform:uppercase; -webkit-user-select:text; user-select:text; padding:0 0 0 .3em;
+  }
+  #code-input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+
+  .toast{
+    position:fixed; left:50%; bottom:calc(100px + env(safe-area-inset-bottom));
+    transform:translateX(-50%) translateY(20px);
+    background:#fff; color:#111; padding:12px 20px; border-radius:12px; font-weight:600;
+    z-index:100; opacity:0; transition:.25s ease; pointer-events:none; max-width:90vw; text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .hide{ display:none !important; }
+</style>
+</head>
+<body>
+
+<div id="app" data-screen="">
+  <button id="conn" data-state="idle">
+    <span class="dot"></span>
+    <span class="txt" id="conn-text">ยังไม่ได้จับคู่ — แตะเพื่อใส่รหัส</span>
+    <span class="code" id="conn-code"></span>
+  </button>
+
+  <div class="title-row">
+    <button id="title" class="ctl"><span class="t" id="title-text">—</span><span class="chev">▾</span></button>
+    <button class="pbtn ctl pb" id="b-exit">✕ ออก</button>
+  </div>
+
+  <div id="prog" class="ctl pb"><div id="prog-fill"></div><div id="prog-pct">0%</div></div>
+
+  <div class="main">
+    <div id="pad" class="ctl pb">
+      <div class="arrows">▲</div>
+      <div>ลากขึ้น-ลง เพื่อเลื่อนข้อความ<br>แตะ = เล่น/หยุด</div>
+      <div class="arrows">▼</div>
+    </div>
+    <div class="side">
+      <button class="pbtn ctl pb" id="b-top">⤒<small>ขึ้นต้น</small></button>
+      <button class="pbtn ctl pb" id="b-up">▲<small>ย้อน</small></button>
+      <button class="pbtn ctl pb" id="b-down">▼<small>ถัดไป</small></button>
+    </div>
+  </div>
+
+  <div class="toggles">
+    <button class="pbtn ctl" id="b-mirror"><b>🪞</b>กระจก</button>
+    <button class="pbtn ctl" id="b-flip"><b>⇅</b>พลิก</button>
+    <button class="pbtn ctl" id="b-guide"><b>▸</b>เส้นอ่าน</button>
+    <button class="pbtn ctl pb" id="b-bar"><b>▴</b>แถบ</button>
+  </div>
+
+  <div class="settings">
+    <div class="grp ctl">
+      <span class="lbl">เร็ว</span>
+      <button class="pbtn" id="spd-down">－</button>
+      <span class="v" id="spd-val">–</span>
+      <button class="pbtn" id="spd-up">＋</button>
+    </div>
+    <div class="grp ctl">
+      <span class="lbl">ขนาด</span>
+      <button class="pbtn" id="fs-down">－</button>
+      <span class="v" id="fs-val">–</span>
+      <button class="pbtn" id="fs-up">＋</button>
+    </div>
+  </div>
+  <input type="range" id="speed-range" class="ctl" min="1" max="100" step="1" value="30">
+
+  <button id="play" class="ctl pb">▶ เล่น</button>
+</div>
+
+<!-- รายการสคริปต์บน iPad -->
+<div id="scripts-sheet" class="sheet hide">
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>📚 สคริปต์บน iPad</h2>
+      <button class="btn icon ghost" data-close>✕</button>
+    </div>
+    <div id="script-list"></div>
+  </div>
+</div>
+
+<!-- ใส่รหัสจับคู่ -->
+<div id="code-sheet" class="sheet hide">
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>🔗 จับคู่กับ iPad</h2>
+      <button class="btn icon ghost" data-close>✕</button>
+    </div>
+    <p class="muted">บน iPad แตะปุ่ม 📱 → “เปิดรีโมต” แล้วใส่รหัส 6 ตัวที่เห็น<br>(หรือสแกน QR บน iPad ด้วยกล้อง iPhone)</p>
+    <input id="code-input" maxlength="6" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="ABC123">
+    <button class="btn go" id="code-go">เชื่อมต่อ</button>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================== ค่าคงที่ ===================== */
+const PEER_LIB  = "https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js";
+const PEER_OPTS = { debug: 1 };   // ต้องตรงกับฝั่ง iPad (index.html)
+const LSK = "tpr.code.v1";        // รหัสล่าสุดที่จับคู่
+const PAD_GAIN = 2;               // ลากบนโทรศัพท์ 1px = เลื่อนบน iPad 2px
+const DIAL_TIMEOUT = 6000;        // ต่อไม่ติดภายในเวลานี้ = ลองใหม่
+
+const STATUS_TEXT = {
+  idle: "ยังไม่ได้จับคู่ — แตะเพื่อใส่รหัส",
+  connecting: "กำลังเชื่อมต่อ…",
+  connected: "เชื่อมต่อแล้ว",
+  notfound: "ไม่พบ iPad — เปิดรีโมตบน iPad แล้วหรือยัง?",
+  lost: "การเชื่อมต่อหลุด กำลังต่อใหม่…",
+  offline: "ไม่มีอินเทอร์เน็ต กำลังลองใหม่…",
+  error: "เชื่อมต่อไม่ได้ กำลังลองใหม่…",
+  nolib: "โหลดไลบรารีไม่ได้ — ต้องต่ออินเทอร์เน็ต"
+};
+
+const R = {
+  peer:null, conn:null, code:"", retry:0, timer:null, ping:null, dialAt:0, lastMsg:0,
+  state:null, ignoreProgressUntil:0, ignoreSpeedUntil:0
+};
+
+/* ===================== ตัวช่วย ===================== */
+const $ = sel => document.querySelector(sel);
+const el = {
+  app: $("#app"), conn: $("#conn"), connText: $("#conn-text"), connCode: $("#conn-code"),
+  title: $("#title"), titleText: $("#title-text"),
+  prog: $("#prog"), progFill: $("#prog-fill"), progPct: $("#prog-pct"),
+  pad: $("#pad"), play: $("#play"),
+  mirror: $("#b-mirror"), flip: $("#b-flip"), guide: $("#b-guide"), bar: $("#b-bar"),
+  spdVal: $("#spd-val"), fsVal: $("#fs-val"), range: $("#speed-range"),
+  scriptsSheet: $("#scripts-sheet"), scriptList: $("#script-list"),
+  codeSheet: $("#code-sheet"), codeInput: $("#code-input"),
+  toast: $("#toast")
+};
+
+let toastTimer = null;
+function toast(msg){
+  el.toast.textContent = msg; el.toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> el.toast.classList.remove("show"), 1800);
+}
+
+// เรียกได้ไม่เกิน 1 ครั้งต่อ ms (ครั้งสุดท้ายในช่วงจะถูกเรียกตามหลังเสมอ) · .flush() = เรียกที่ค้างทันที
+function throttle(fn, ms){
+  let last = 0, timer = null;
+  const run = () => { timer = null; last = Date.now(); fn(); };
+  const t = () => {
+    const wait = ms - (Date.now() - last);
+    if(wait <= 0){ clearTimeout(timer); run(); }
+    else if(!timer){ timer = setTimeout(run, wait); }
+  };
+  t.flush = () => { if(timer){ clearTimeout(timer); run(); } };
+  return t;
+}
+
+let libLoad = null;
+function loadLib(){
+  if(window.Peer) return Promise.resolve();
+  if(!libLoad){
+    libLoad = new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = PEER_LIB; s.async = true;
+      s.onload = () => window.Peer ? res() : rej(new Error("no Peer"));
+      s.onerror = () => { s.remove(); rej(new Error("load failed")); };
+      document.head.appendChild(s);
+    }).catch(e => { libLoad = null; throw e; });
+  }
+  return libLoad;
+}
+
+function normalizeCode(s){ return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); }
+
+/* ===================== การเชื่อมต่อ ===================== */
+function setStatus(status){
+  el.conn.dataset.state = status;
+  el.connText.textContent = STATUS_TEXT[status] || status;
+  el.app.classList.toggle("live", status === "connected");
+}
+
+function setCode(raw){
+  const code = normalizeCode(raw);
+  if(code.length !== 6){ setStatus("idle"); openCodeSheet(); return; }
+  if(code !== R.code){ dropConn(); R.code = code; }
+  try{ localStorage.setItem(LSK, code); }catch(_){}
+  if(location.hash.slice(1) !== code) history.replaceState(null, "", "#" + code);
+  el.connCode.textContent = code;
+  R.retry = 0;
+  if(!isLive()) setStatus("connecting");
+  kick();
+}
+
+// ทำขั้นต่อไปที่ขาดอยู่: โหลดไลบรารี → เปิด peer ของเรา → ต่อไปหา iPad
+function kick(){
+  clearTimeout(R.timer); R.timer = null;
+  if(!R.code) return;
+  if(!window.Peer){
+    loadLib().then(kick, () => { setStatus("nolib"); later(); });
+    return;
+  }
+  if(!R.peer || R.peer.destroyed){ makePeer(); return; }          // เปิดเสร็จแล้วจะ kick ต่อเอง
+  if(R.peer.disconnected){ try{ R.peer.reconnect(); }catch(_){} later(); return; }
+  if(!R.peer.open){ later(); return; }
+  dial();
+}
+function later(){
+  clearTimeout(R.timer);
+  const delay = Math.min(5000, 1000 * Math.pow(1.6, R.retry++));
+  R.timer = setTimeout(kick, delay);
+}
+
+function makePeer(){
+  if(R.peer){ try{ R.peer.destroy(); }catch(_){} }
+  const peer = new Peer(PEER_OPTS);   // ให้เซิร์ฟเวอร์ตั้ง id ให้ ไม่ชนกับใคร
+  R.peer = peer;
+  if(!isLive()) setStatus("connecting");
+  peer.on("open", () => { if(R.peer === peer) kick(); });
+  peer.on("disconnected", () => { if(R.peer === peer) later(); });
+  peer.on("error", err => {
+    if(R.peer !== peer) return;
+    const type = err && err.type;
+    if(type === "peer-unavailable"){
+      // iPad ยังไม่ได้เปิดรีโมต (หรือรหัสผิด) → ลองใหม่เรื่อย ๆ
+      if(R.conn && !R.conn.open) dropConn();
+      setStatus("notfound");
+    } else if(type === "browser-incompatible"){
+      setStatus("error"); el.connText.textContent = "เบราว์เซอร์นี้ไม่รองรับ"; return;
+    } else if(!isLive()){
+      setStatus(["network", "disconnected", "socket-error", "socket-closed", "server-error"].includes(type) ? "offline" : "error");
+    }
+    later();
+  });
+}
+
+function isLive(){ return !!(R.conn && R.conn.open); }
+
+function dial(){
+  if(R.conn){
+    if(R.conn.open) return;
+    if(Date.now() - R.dialAt < DIAL_TIMEOUT){ later(); return; }   // ยังรอผลครั้งก่อนอยู่
+    // ไม่มีคำตอบเลย (เซิร์ฟเวอร์ไม่แจ้งเสมอไปว่าไม่มี iPad) → ถือว่ายังไม่พบ แล้วลองใหม่
+    dropConn();
+    setStatus("notfound");
+  }
+  if(el.conn.dataset.state !== "notfound") setStatus("connecting");
+  const conn = R.peer.connect("tp-" + R.code, { reliable:true, serialization:"json" });
+  if(!conn){ later(); return; }
+  R.conn = conn; R.dialAt = Date.now();
+  later();   // เฝ้าดูไว้ ถ้าไม่ต่อติดภายใน DIAL_TIMEOUT จะต่อใหม่
+  conn.on("open", () => {
+    if(R.conn !== conn) return;
+    clearTimeout(R.timer); R.timer = null;
+    conn._opened = true;
+    R.retry = 0; R.lastMsg = Date.now();
+    setStatus("connected");
+    send({ t:"hello", v:1, name:"iPhone" });
+    startPing();
+    requestWakeLock();
+  });
+  conn.on("data", m => { if(R.conn === conn){ R.lastMsg = Date.now(); onMsg(m); } });
+  conn.on("close", () => {
+    if(R.conn !== conn) return;
+    R.conn = null; stopPing();
+    if(conn._opened) setStatus("lost");
+    later();
+  });
+  conn.on("error", () => {});   // close จะตามมาเอง
+}
+
+function dropConn(){
+  const c = R.conn; R.conn = null; stopPing();
+  if(c){ try{ c.close(); }catch(_){} }
+}
+
+function send(m){ if(R.conn && R.conn.open){ try{ R.conn.send(m); }catch(_){} } }
+
+// iOS หยุด JS ตอนล็อกจอ และ close อาจไม่มาเลย → ping ทุก 2.5 วิ ถ้าเงียบเกิน 8 วิ ถือว่าหลุด
+function startPing(){
+  stopPing();
+  R.ping = setInterval(() => {
+    if(Date.now() - R.lastMsg > 8000){ dropConn(); setStatus("lost"); later(); return; }
+    send({ t:"ping", ts:Date.now() });
+  }, 2500);
+}
+function stopPing(){ clearInterval(R.ping); R.ping = null; }
+
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState !== "visible") return;
+  R.retry = 0;
+  if(isLive()){
+    // กลับมาจากพักจอ: ถาม iPad ทันที ถ้าไม่ตอบใน 1.5 วิ ต่อใหม่เลย ไม่ต้องรอ 8 วิ
+    const t0 = Date.now();
+    send({ t:"ping", ts:t0 });
+    setTimeout(() => { if(isLive() && R.lastMsg < t0){ dropConn(); setStatus("lost"); kick(); } }, 1500);
+  } else {
+    kick();
+  }
+  requestWakeLock();
+});
+window.addEventListener("pageshow", () => kick());
+window.addEventListener("online", () => { R.retry = 0; kick(); });
+window.addEventListener("hashchange", () => {
+  const c = normalizeCode(location.hash.slice(1));
+  if(c.length === 6 && c !== R.code) setCode(c);
+});
+
+/* ===================== ข้อความจาก iPad ===================== */
+function onMsg(m){
+  if(!m || typeof m !== "object") return;
+  switch(m.t){
+    case "pong": break;
+    case "progress":
+      if(Date.now() > R.ignoreProgressUntil && !progDragging) setProgress(m.p);
+      setPlayUI(m.playing);
+      break;
+    case "state": renderState(m); break;
+    case "toast": toast(m.msg); break;
+  }
+}
+
+function setProgress(p){
+  const pct = Math.round(Math.min(1, Math.max(0, p || 0)) * 100);
+  el.progFill.style.width = pct + "%";
+  el.progPct.textContent = pct + "%";
+}
+function setPlayUI(playing){
+  el.play.classList.toggle("playing", !!playing);
+  el.play.textContent = playing ? "⏸ หยุด" : "▶ เล่น";
+}
+
+function renderState(s){
+  R.state = s;
+  el.app.dataset.screen = s.screen || "";
+  setPlayUI(s.playing);
+  if(Date.now() > R.ignoreProgressUntil && !progDragging) setProgress(s.progress);
+  el.spdVal.textContent = s.speed;
+  if(Date.now() > R.ignoreSpeedUntil && !rangeDragging) el.range.value = s.speed;
+  el.fsVal.textContent = s.fontSize;
+  el.mirror.classList.toggle("on", !!s.mirrorH);
+  el.flip.classList.toggle("on", !!s.mirrorV);
+  el.guide.classList.toggle("on", !!s.guide);
+  el.bar.classList.toggle("on", !s.barHidden);
+  if(s.screen === "prompter") el.titleText.textContent = "📄 " + (s.title || "(ไม่มีชื่อ)");
+  else if(s.screen === "editor") el.titleText.textContent = "✏️ iPad กำลังแก้ไขสคริปต์";
+  else el.titleText.textContent = "📚 แตะเพื่อเลือกสคริปต์";
+  if(!el.scriptsSheet.classList.contains("hide")) renderScriptList();
+}
+
+function renderScriptList(){
+  const s = R.state;
+  el.scriptList.innerHTML = "";
+  if(!s || !s.scripts || !s.scripts.length){
+    const p = document.createElement("p");
+    p.className = "muted"; p.textContent = "ยังไม่มีสคริปต์บน iPad";
+    el.scriptList.appendChild(p);
+    return;
+  }
+  s.scripts.forEach(x => {
+    const b = document.createElement("button");
+    b.className = "item" + (s.screen === "prompter" && x.id === s.scriptId ? " current" : "");
+    b.textContent = x.title;
+    b.onclick = () => { send({ t:"open", id:x.id }); closeSheets(); };
+    el.scriptList.appendChild(b);
+  });
+}
+
+/* ===================== แผ่นเลื่อนขึ้น ===================== */
+function openScriptsSheet(){ renderScriptList(); el.scriptsSheet.classList.remove("hide"); }
+function openCodeSheet(){
+  el.codeInput.value = R.code;
+  el.codeSheet.classList.remove("hide");
+  setTimeout(() => el.codeInput.focus(), 50);
+}
+function closeSheets(){
+  el.scriptsSheet.classList.add("hide");
+  el.codeSheet.classList.add("hide");
+  el.codeInput.blur();
+}
+
+/* ===================== ทัชแพด ===================== */
+const PAD_TAP_MOVE = 8;   // px
+let pad = { down:false, y0:0, lastY:0, t0:0, moved:false }, acc = 0;
+const flushNudge = throttle(() => {
+  if(!acc) return;
+  send({ t:"nudge", px:Math.round(acc) }); acc = 0;
+}, 50);
+
+el.pad.addEventListener("pointerdown", e => {
+  try{ el.pad.setPointerCapture(e.pointerId); }catch(_){}
+  pad = { down:true, y0:e.clientY, lastY:e.clientY, t0:Date.now(), moved:false };
+  el.pad.classList.add("active");
+});
+el.pad.addEventListener("pointermove", e => {
+  if(!pad.down) return;
+  if(!pad.moved){
+    if(Math.abs(e.clientY - pad.y0) < PAD_TAP_MOVE) return;
+    pad.moved = true; pad.lastY = pad.y0;
+  }
+  // ลากขึ้น = ข้อความเลื่อนไปข้างหน้า (เหมือนลากบนจอ iPad)
+  acc += -(e.clientY - pad.lastY) * PAD_GAIN;
+  pad.lastY = e.clientY;
+  flushNudge();
+});
+function padEnd(){
+  if(!pad.down) return;
+  pad.down = false;
+  el.pad.classList.remove("active");
+  if(!pad.moved && Date.now() - pad.t0 < 350) send({ t:"toggle" });
+  else flushNudge.flush();
+}
+el.pad.addEventListener("pointerup", padEnd);
+el.pad.addEventListener("pointercancel", padEnd);
+
+/* ===================== แถบความคืบหน้า ===================== */
+let progDragging = false, progF = 0;
+const sendSeek = throttle(() => send({ t:"seek", f:progF }), 60);
+function progAt(e){
+  const r = el.prog.getBoundingClientRect();
+  progF = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  setProgress(progF);
+  sendSeek();
+}
+el.prog.addEventListener("pointerdown", e => {
+  try{ el.prog.setPointerCapture(e.pointerId); }catch(_){}
+  progDragging = true; progAt(e);
+});
+el.prog.addEventListener("pointermove", e => { if(progDragging) progAt(e); });
+function progEnd(){
+  if(!progDragging) return;
+  progDragging = false;
+  sendSeek.flush();
+  R.ignoreProgressUntil = Date.now() + 400;   // กันแถบเด้งกลับระหว่างรอ iPad ตอบ
+}
+el.prog.addEventListener("pointerup", progEnd);
+el.prog.addEventListener("pointercancel", progEnd);
+
+/* ===================== สไลเดอร์ความเร็ว ===================== */
+let rangeDragging = false;
+const sendSpeed = throttle(() => send({ t:"speed", v:+el.range.value }), 80);
+el.range.addEventListener("pointerdown", () => { rangeDragging = true; });
+el.range.addEventListener("input", () => { el.spdVal.textContent = el.range.value; sendSpeed(); });
+function rangeEnd(){
+  rangeDragging = false;
+  sendSpeed.flush();
+  R.ignoreSpeedUntil = Date.now() + 400;
+}
+el.range.addEventListener("change", rangeEnd);
+el.range.addEventListener("pointerup", rangeEnd);
+el.range.addEventListener("pointercancel", rangeEnd);
+
+/* ===================== ปุ่ม ===================== */
+// กดค้าง = ทำซ้ำ (สำหรับ ± และ ▲▼)
+function holdRepeat(btn, fn){
+  let t1 = null, t2 = null;
+  const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; btn.classList.remove("held"); };
+  btn.addEventListener("pointerdown", e => {
+    e.preventDefault(); stop(); fn(); btn.classList.add("held");
+    t1 = setTimeout(() => { t2 = setInterval(fn, 110); }, 420);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev => btn.addEventListener(ev, stop));
+  btn.addEventListener("contextmenu", e => e.preventDefault());
+}
+
+function bind(){
+  el.conn.onclick = openCodeSheet;
+  el.title.onclick = openScriptsSheet;
+  $("#b-exit").onclick = () => send({ t:"exit" });
+  el.play.onclick = () => send({ t:"toggle" });
+  $("#b-top").onclick = () => send({ t:"top" });
+  holdRepeat($("#b-up"),   () => send({ t:"nudge", lines:-1 }));
+  holdRepeat($("#b-down"), () => send({ t:"nudge", lines:+1 }));
+  el.mirror.onclick = () => send({ t:"mirror" });
+  el.flip.onclick   = () => send({ t:"flip" });
+  el.guide.onclick  = () => send({ t:"guide" });
+  el.bar.onclick    = () => send({ t:"bar" });
+  holdRepeat($("#spd-down"), () => send({ t:"speed", d:-1 }));
+  holdRepeat($("#spd-up"),   () => send({ t:"speed", d:+1 }));
+  holdRepeat($("#fs-down"),  () => send({ t:"font", d:-2 }));
+  holdRepeat($("#fs-up"),    () => send({ t:"font", d:+2 }));
+
+  document.querySelectorAll("[data-close]").forEach(b => b.onclick = closeSheets);
+  document.querySelectorAll(".sheet").forEach(s => s.addEventListener("click", e => { if(e.target === s) closeSheets(); }));
+  el.codeInput.addEventListener("input", () => {
+    const v = normalizeCode(el.codeInput.value);
+    if(el.codeInput.value !== v) el.codeInput.value = v;
+  });
+  const go = () => {
+    const c = normalizeCode(el.codeInput.value);
+    if(c.length !== 6){ toast("รหัสต้องมี 6 ตัว"); return; }
+    closeSheets(); setCode(c);
+  };
+  $("#code-go").onclick = go;
+  el.codeInput.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
+
+  document.addEventListener("gesturestart", e => e.preventDefault());   // กัน pinch-zoom
+}
+
+/* ===================== Wake Lock (กันจอดับ) ===================== */
+let wakeLock = null, wakeWarned = false;
+async function requestWakeLock(){
+  try{
+    if("wakeLock" in navigator){
+      if(!wakeLock){
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", ()=>{ wakeLock = null; });
+      }
+    } else if(!wakeWarned){
+      wakeWarned = true;
+      toast("กันจอดับไม่ทำงาน: ตั้ง Auto-Lock = Never");
+    }
+  }catch(e){
+    if(!wakeWarned){ wakeWarned = true; toast("กันจอดับไม่ทำงาน (เช่น โหมดประหยัดพลังงาน)"); }
+  }
+}
+
+/* ===================== เริ่มทำงาน ===================== */
+bind();
+setCode(location.hash.slice(1) || (() => { try{ return localStorage.getItem(LSK); }catch(_){ return ""; } })());
+</script>
+</body>
+</html>
