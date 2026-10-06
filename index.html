@@ -103,7 +103,7 @@
     position:absolute; left:0; right:0; top:0; will-change:transform;
     padding:0 8vw; transform:translateY(0);
   }
-  #track-inner{ font-weight:700; color:#fff; white-space:pre-wrap; word-wrap:break-word; }
+  #track-inner{ position:relative; font-weight:700; color:#fff; white-space:pre-wrap; word-wrap:break-word; }
   /* ระยะเริ่ม/จบ เพื่อให้บรรทัดแรกขึ้นถึงเส้นอ่าน และบรรทัดสุดท้ายเลื่อนพ้นเส้นอ่านได้ */
   #spacer-top{ height:42vh; }
   #spacer-bottom{ height:75vh; }
@@ -567,6 +567,34 @@ const prompter = {
   raf:0,
   last:0
 };
+let prompterText = "";   // ข้อความที่แสดงอยู่ในหน้าโปรย
+
+// แสดงข้อความทีละบรรทัด (1 div ต่อ 1 บรรทัดในสคริปต์) เพื่อให้ iPhone จับตำแหน่งได้ตรงบรรทัด
+function renderLines(box, text){
+  box.textContent = "";
+  String(text).split(/\r?\n/).forEach(line => {
+    const d = document.createElement("div");
+    d.textContent = line || " ";   // บรรทัดว่างให้สูงเท่าบรรทัดปกติ
+    box.appendChild(d);
+  });
+}
+// y (px จากบนสุดของข้อความ) → ตำแหน่ง "บรรทัดที่ + สัดส่วนในบรรทัด" เช่น 3.4 = บรรทัดที่ 4 ไปแล้ว 40%
+function textPos(box, y){
+  const kids = box.children;
+  if(!kids.length) return 0;
+  let i = 0;
+  while(i < kids.length - 1 && kids[i + 1].offsetTop <= y) i++;
+  const k = kids[i], h = k.offsetHeight || 1;
+  return i + Math.min(1, Math.max(0, (y - k.offsetTop) / h));
+}
+// ย้อนกลับ: ตำแหน่ง → y (px)
+function textY(box, pos){
+  const kids = box.children;
+  if(!kids.length) return 0;
+  const i = Math.min(kids.length - 1, Math.max(0, Math.floor(pos)));
+  const k = kids[i];
+  return k.offsetTop + Math.min(1, Math.max(0, pos - i)) * k.offsetHeight;
+}
 
 function applyTextStyle(){
   el.inner.style.fontSize = settings.fontSize + "px";
@@ -647,7 +675,8 @@ function startPrompter(id){
   if(!s) return;
   currentId = id;
   save(LS.last, id);
-  el.inner.textContent = s.body && s.body.trim() ? s.body : "(สคริปต์ว่าง)";
+  prompterText = s.body && s.body.trim() ? s.body : "(สคริปต์ว่าง)";
+  renderLines(el.inner, prompterText);
   applyTextStyle();
   syncPrompterUI();
   clearTimeout(barTimer); setBar(false);   // เริ่มด้วยแถบเครื่องมือเปิดไว้
@@ -967,7 +996,7 @@ function openPeer(){
       remote.conns.add(conn); conn._seen = Date.now();
       refreshRemoteStatus();
       requestWakeLock();
-      remoteSend(conn, remoteState());
+      remoteSendState(conn);
     };
     const drop = () => { if(remote.conns.delete(conn)) refreshRemoteStatus(); };
     conn.on("open", add);
@@ -1065,11 +1094,20 @@ function currentScreen(){
        : el.editor.classList.contains("active") ? "editor" : "library";
 }
 function progressValue(){ return prompter.max ? Math.min(1, prompter.offset / prompter.max) : 0; }
+// บรรทัดที่เส้นอ่านอยู่ (ดู textPos) — เส้นอ่านอยู่ตรงขอบล่างของ spacer-top พอดี
+// ตอนเริ่ม (offset 0) จึงตรงกับบนสุดของข้อความ
+function textValue(){ return textPos(el.inner, prompter.offset); }
+// ส่งสถานะ + ข้อความสคริปต์ (ส่งข้อความเฉพาะตอนเปลี่ยน เพื่อไม่ให้ส่งซ้ำทุกครั้ง)
+function remoteSendState(conn, st){
+  remoteSend(conn, st || remoteState());
+  const body = prompterText;
+  if(conn.open && conn._body !== body){ conn._body = body; remoteSend(conn, { t:"script", body }); }
+}
 function remoteState(){
   const s = currentId ? scripts.find(x => x.id === currentId) : null;
   return {
     t:"state", v:1, screen:currentScreen(),
-    playing:prompter.playing, progress:progressValue(),
+    playing:prompter.playing, progress:progressValue(), tp:textValue(),
     speed:settings.speed, fontSize:settings.fontSize,
     mirrorH:settings.mirrorH, mirrorV:settings.mirrorV, guide:settings.guide, barHidden,
     scriptId: s ? s.id : null, title: s ? (s.title || "(ไม่มีชื่อ)") : "",
@@ -1084,11 +1122,11 @@ function remoteBroadcast(){
   setTimeout(() => {
     remote.pending = false;
     const st = remoteState();
-    remote.conns.forEach(c => remoteSend(c, st));
+    remote.conns.forEach(c => remoteSendState(c, st));
   }, 30);
 }
 const remoteProgress = throttle(() => {
-  const m = { t:"progress", p:progressValue(), playing:prompter.playing };
+  const m = { t:"progress", p:progressValue(), tp:textValue(), playing:prompter.playing };
   remote.conns.forEach(c => remoteSend(c, m));
 }, 100);
 
@@ -1098,7 +1136,8 @@ function onRemoteMessage(msg, conn){
   const inPrompter = el.prompter.classList.contains("active");
   const num = v => typeof v === "number" && isFinite(v);
   switch(msg.t){
-    case "hello": case "state?": remoteSend(conn, remoteState()); break;
+    case "hello": conn._body = null; remoteSendState(conn); break;
+    case "state?": remoteSendState(conn); break;
     case "ping":   remoteSend(conn, { t:"pong", ts:msg.ts }); break;
     // เล่น/เลื่อน — เฉพาะหน้าโปรย (กติกาเดียวกับคีย์บอร์ด)
     case "toggle": if(inPrompter) setPlaying(!prompter.playing); break;
@@ -1106,6 +1145,13 @@ function onRemoteMessage(msg, conn){
     case "pause":  if(inPrompter) setPlaying(false); break;
     case "top":    if(inPrompter) restartTop(); break;
     case "seek":   if(inPrompter && num(msg.f)) seekFraction(msg.f); break;
+    // ลากจอย่อบน iPhone → ให้บรรทัดเดียวกันมาอยู่ที่เส้นอ่าน
+    case "seekText":
+      if(inPrompter && num(msg.pos)){
+        prompter.offset = Math.min(prompter.max, Math.max(0, textY(el.inner, msg.pos)));
+        applyScroll();
+      }
+      break;
     case "nudge":
       if(!inPrompter) break;
       if(num(msg.px)) nudge(msg.px);
